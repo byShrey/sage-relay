@@ -1,0 +1,11 @@
+{
+  "name": "sage-relay",
+  "owner": { "name": "byShrey" },
+  "plugins": [
+    {
+      "name": "sage-relay",
+      "source": "./plugins/sage-relay",
+      "description": "Hands a long chat off to a fresh one automatically, with optional model routing for helper agents."
+    }
+  ]
+}
