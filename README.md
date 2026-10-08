@@ -3,7 +3,7 @@
 A plugin for Claude Code (desktop Code tab) that does two jobs:
 
 1. **Long-chat handoff.** When a chat gets long, it saves a note of the whole conversation, clears the chat, and starts a fresh one that carries on from the note. Every message in a long chat re-pays for the whole chat, so a fresh start is cheaper.
-2. **Helper agents and optional model routing.** Three helper types ship with the plugin, and the chat picks one by judgement: **Deep** (Opus, high effort) for hard thinking such as planning, design, research and audits; **Careful** (Sonnet, high effort) for well-defined multi-step work; **Scout** (Sonnet, read-only tools) for finding and reading. Easy questions stay in your own chat. Helpers start without your rules files and without the chat's history, so the chat must give them a full brief. They add about 300 tokens to every chat (their descriptions). Routing is off by default; `/switch routing on` makes helpers that name no model get one by type. Your own model pick for the main chat is never overridden.
+2. **Helper agents and optional model routing.** Three helper types ship with the plugin, and the chat picks one by judgement: **Deep** (Opus, high effort) for hard thinking such as planning, design, research and audits; **Careful** (Sonnet, high effort) for well-defined multi-step work; **Scout** (Sonnet, read-only tools) for finding and reading. Easy questions stay in your own chat. Helpers start without your rules files and without the chat's history, so the chat must give them a full brief. They add about 300 tokens to every chat (their descriptions). Routing is off by default; `/switch routing on` makes helpers that name no model get one by type. **Every chat starts on Sonnet 5.5 medium** (a one-line notice appears if it moves a chat off another model), so hard thinking goes to a Deep (Opus) helper instead of the main chat. A pick you make in the model menu afterwards, `/switch opus high`, or `/switch off` wins; usage never changes the model.
 
 The plugin makes no network calls and no model calls of its own. The note builder is plain Python from the standard library. Note that the new chat does send the note to the API, like any message.
 
@@ -40,7 +40,7 @@ An automatic handoff says `STATUS: CONTINUE` (the new chat carries on) only if w
 /switch resend          send the last note again
 /switch ceiling 200000  change the ceiling (minimum 20000)
 /switch routing on|off  helper routing by type (off by default)
-/switch opus high | sonnet medium    fix a model for this chat
+/switch opus high | sonnet medium    fix a model for this chat (/switch off: no fixed model, no Sonnet default)
 /switch log             last 10 routing log lines
 ```
 

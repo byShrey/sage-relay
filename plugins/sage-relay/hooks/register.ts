@@ -47,7 +47,7 @@ export const HELPERS = [
   { name: 'scout', model: NAME.sonnet, description: `Use Scout for finding, listing, reading and searching with no judgement needed. ${EASY}` },
 ].map(h => ({ ...h, prompt: HELPER_PROMPT, omitClaudeMd: true as const, maxTurns: h.name === 'scout' ? 20 : 40, ...(h.name === 'scout' && { tools: ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch'] }) })) // ponytail: no rules file in helpers (the brief carries what matters); Scout is read-only
 
-const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0, idleHeldAt: 0 })
+const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0, idleHeldAt: 0, pinTried: false })
 type St = ReturnType<typeof fresh>
 // State per chat: one module may serve several open chats. Oldest dropped past SESSIONS.
 export const M = new Map<string, St>()
@@ -74,7 +74,9 @@ const ceilOf = (S: St): { v: number; src: 'default' | 'file' | 'command' } =>
 const point = (S: St) => Math.max(Math.min(ceilOf(S).v, 0.8 * (S.window || Infinity)), S.base ? S.base + GROWTH : 0) // what actually triggers a handoff
 const willRun = (S: St) => S.auto && S.run < MAX_RUN && PY !== null
 const readHome = async ($: any, p: string): Promise<string | null> => {
-  try { return await $.fs.read(((await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? '') + p) } catch { return null }
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+  if (!home) return null
+  try { return await $.fs.read(home + p) } catch { return null }
 }
 const routingOn = async ($: any, S: St) => S.routing ?? (routingDefault ??= (await readHome($, PIN_FILE))?.trim() === 'on')
 
@@ -286,12 +288,18 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) return yield* next(e)
     const S = await st($)
+    if (!S.pinTried) { // each chat starts on Sonnet 5.5 medium; Opus work goes to a Deep helper. A menu pick or /switch opus later wins.
+      S.pinTried = true
+      if (e.model !== NAME.sonnet && !S.fixed) { S.fixed = { model: NAME.sonnet, effort: 'medium' }; $.ui.toast('Sage Relay: this chat runs on Sonnet 5.5 medium; hard thinking goes to a Deep (Opus) helper. /switch opus high keeps this chat on Opus; /switch off stops this.') }
+    }
     if (S.fixed && (S.menu ||= e.model) !== e.model) { S.fixed = undefined; $.ui.status('fixed model off: you picked one in the menu') }
     const f = S.fixed
     if (e.index === 0 && (f || await routingOn($, S))) { // one line per reply, the model that runs
       const chat = (await $.session.id().catch(() => '?')).slice(0, 4)
-      const log = ((await $.store.get('log')) as string[] | undefined) ?? []
-      await $.store.set('log', [...log, `${f ? label(f.model, f.effort) : label(e.model, e.effort)} | ${chat} | ${f ? 'fixed' : `${S.text.replace(/\s+/g, ' ')} | 5h ${fiveHour}%`}`].slice(-KEEP))
+      try {
+        const log = ((await $.store.get('log')) as string[] | undefined) ?? []
+        await $.store.set('log', [...log, `${f ? label(f.model, f.effort) : label(e.model, e.effort)} | ${chat} | ${f ? 'fixed' : `${S.text.replace(/\s+/g, ' ')} | 5h ${fiveHour}%`}`].slice(-KEEP))
+      } catch { /* a locked store must not stop the turn */ }
     }
 
     return yield* next(f ? { ...e, model: f.model, ...(f.effort ? { effort: f.effort } : {}) } : e)
@@ -309,7 +317,7 @@ export const register: Register = on => {
     const S = await st($)
     if (a === 'routing' && (b === 'on' || b === 'off')) { S.routing = b === 'on'; return { text: `routing ${b} for this chat` } }
     if (a === 'auto') { S.routing = true; return { text: 'routing on for this chat' } } // legacy alias
-    if (a === 'off') { S.routing = false; S.fixed = undefined; return { text: 'routing off for this chat, no fixed model' } }
+    if (a === 'off') { S.routing = false; S.fixed = undefined; S.pinTried = true; return { text: 'routing off for this chat, no fixed model' } }
     if (a === 'resend') return { text: !S.pending ? 'nothing to resend' : await resend($, S) ? 'resent' : 'not delivered; the note is kept, try /switch resend again' }
     if (a === 'handoff' && (b === 'on' || b === 'off')) { S.auto = b === 'on'; S.fails = 0; S.retryAt = 0; return { text: `automatic handoff ${b} for this chat` } }
     if (a === 'handoff') {
@@ -351,7 +359,7 @@ export const register: Register = on => {
       return { text: `fixed to ${label(S.fixed.model, S.fixed.effort)} until /switch off or a menu pick` }
     }
 
-    return { text: 'Usage: /switch status | note | handoff [on|off] | resend | ceiling N | routing on|off | log | opus|sonnet [low|medium|high] (a fixed model for this chat) | off (routing off, no fixed model). auto = routing on (legacy).' }
+    return { text: 'Usage: /switch status | note | handoff [on|off] | resend | ceiling N | routing on|off | log | opus|sonnet [low|medium|high] (a fixed model for this chat) | off (routing off, no fixed model; also stops the Sonnet default). auto = routing on (legacy).' }
   })
 }
 

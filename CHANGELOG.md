@@ -20,7 +20,7 @@
 - Notes are deleted after 14 days; folder 700, files 600. Note size is capped.
 
 **Routing**
-- Model routing is now off by default: `/switch routing on|off`. Your own model pick is never overridden.
+- Model routing for helpers is off by default: `/switch routing on|off`. Every chat starts on Sonnet 5.5 medium (with a notice); a menu pick, `/switch opus high` or `/switch off` wins afterwards, and usage never changes the model.
 - Three helper agents the chat chooses by judgement: Deep (Opus, high), Careful (Sonnet, high), Scout (Sonnet, read-only). No Haiku anywhere, and the main chat never changes model for usage reasons.
 
 **New commands**: `/switch status`, `/switch note` (preview without clearing), `/switch handoff off|on`.

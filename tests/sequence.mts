@@ -465,5 +465,17 @@ await scenario('R15 a chat open before an engine restart (no session.start) stil
   want(h.count(/^REGISTER switch/) === 1, 'registered more than once: ' + h.count(/^REGISTER switch/))
 })
 
+await scenario('R16 every chat starts on Sonnet 5.5 medium: Opus is moved down once, with a notice; menu pick and /switch win', async () => {
+  const h = await make()
+  const s1 = await h.step('claude-opus-5-5'); want(s1.model === 'claude-sonnet-5-5' && s1.effort === 'medium', 'not moved to sonnet medium: ' + JSON.stringify(s1))
+  want(h.count(/toast: Sage Relay: this chat runs on Sonnet/) === 1, 'notice count ' + h.count(/toast: Sage Relay: this chat runs on Sonnet/))
+  const s2 = await h.step('claude-opus-5-5', 1); want(s2.model === 'claude-sonnet-5-5', 'second step left sonnet: ' + s2.model)
+  want(h.count(/toast: Sage Relay: this chat runs on Sonnet/) === 1, 'notice repeated')
+  const s3 = await h.step('claude-fable-5-1', 0); want(s3.model === 'claude-fable-5-1', 'a menu pick was overridden: ' + s3.model)
+  const h2 = await make(); const k = await h2.step('claude-sonnet-5-5'); want(k.model === 'claude-sonnet-5-5' && k.effort === 'low' && h2.count(/runs on Sonnet/) === 0, 'a Sonnet chat was touched')
+  const h3 = await make(); await h3.sw('off'); const o = await h3.step('claude-opus-5-5'); want(o.model === 'claude-opus-5-5', '/switch off did not stop the default: ' + o.model)
+  const h4 = await make(); await h4.sw('opus high'); const p = await h4.step('claude-sonnet-5-5'); want(p.model === 'claude-opus-5-5', '/switch opus high ignored: ' + p.model)
+})
+
 console.log(failed ? `${failed} FAILED` : 'all passed')
 process.exit(failed ? 1 : 0)
