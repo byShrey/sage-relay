@@ -24,7 +24,7 @@ Restart the app afterwards. Needs `python3` on your PATH or at `/usr/bin/python3
 | Chat reaches the ceiling (default 300k tokens, or 80% of the window) | Blocks new tool calls, builds the note, clears the chat, and sends the note as the first message of the new chat. A message you type while the note builds is held and sent once with the note. |
 | 95% of your 5-hour limit | One notice per limit window. It does not clear anything. `/switch handoff` starts a fresh chat if you want one. |
 | New chat after a handoff | Waits for 40k tokens of growth past its own start size before it can hand off again. At most 2 handoffs in a row. |
-| Message after about 55 minutes idle in a chat of 50k+ | A warning that the saved copy has likely expired and the next message re-pays for the whole chat. |
+| Message after about 55 minutes idle in a chat of 50k+ | The message is held with the cost (the saved copy has likely expired and the next message re-pays for the whole chat). Send it again within 2 minutes to go through, or `/switch handoff` to start fresh. Each chat's last turn is kept in the store, so an engine update does not reset it. |
 
 If building the note fails, the chat is **not** cleared: you see "note failed, chat kept", and automatic handoff stays off for that chat until `/switch handoff on` or a successful manual handoff. If the new chat can't be started after a clear, the note stays pending and `/switch resend` sends it.
 
@@ -71,7 +71,7 @@ The replay cannot measure how much detail each handoff loses, so lower is not au
 - Two independent audits (a Claude Opus helper and a blind Gemini review) found the bugs fixed in 0.7.0. Each confirmed bug fails on 0.6.1 and passes on 0.7.0.
 - Note quality, blind-scored on 30 questions about one real chat: this note 29/30, a summary-based note 26/30, built-in compaction 20/30. One chat, one run; differences of a few points are within noise.
 - Handoff sequence tested live: forced and unforced, note arrived in the new chat.
-- **Not tested:** the idle warning (needs a real hour of waiting), auto-on at plan approval (works on the fake engine, not yet seen live), whether helper registration survives a `/clear` you type yourself, how often the chat picks the right helper, Windows (no file locking there).
+- **Not tested:** the idle hold on the real desktop app (proven on the fake engine incl. restart and two chats; not seen live, and the app must label typed prompts as `composer`), auto-on at plan approval (works on the fake engine, not yet seen live), whether helper registration survives a `/clear` you type yourself, how often the chat picks the right helper, Windows (no file locking there).
 - Very long chats: the middle of the conversation is trimmed to fit a size cap, so the note is not word for word for those.
 
 ## Privacy

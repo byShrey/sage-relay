@@ -15,6 +15,8 @@ const CEILING_FILE = '/.claude/sage-relay/ceiling' // optional file holding one 
 const PIN_FILE = '/.claude/sage-relay/pin-models' // legacy: "on" in it switches routing on at first use
 const WARN = 250 / 300 // notice at this share of the handoff point
 const IDLE_MS = 55 * 60_000 // the saved copy expires after about an hour
+const IDLE_MIN_TOKENS = 50_000 // below this a cold restart is cheap, so no hold
+const IDLE_RESEND_MS = 2 * 60_000 // sending again within this long after a hold goes through
 const GROWTH = 40_000 // after a handoff, wait for this much growth past the new chat's own start size
 const RETRY_GROWTH = 20_000 // after a failed note, try again once the chat has grown this much
 const MAX_FAILS = 3 // failed notes in a row before automatic handoff pauses for the chat
@@ -45,7 +47,7 @@ export const HELPERS = [
   { name: 'scout', model: NAME.sonnet, description: `Use Scout for finding, listing, reading and searching with no judgement needed. ${EASY}` },
 ].map(h => ({ ...h, prompt: HELPER_PROMPT, omitClaudeMd: true as const, maxTurns: h.name === 'scout' ? 20 : 40, ...(h.name === 'scout' && { tools: ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch'] }) })) // ponytail: no rules file in helpers (the brief carries what matters); Scout is read-only
 
-const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0 })
+const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0, idleHeldAt: 0 })
 type St = ReturnType<typeof fresh>
 // State per chat: one module may serve several open chats. Oldest dropped past SESSIONS.
 export const M = new Map<string, St>()
@@ -117,6 +119,16 @@ async function buildNote($: any, S: St): Promise<{ tag: string; text: string } |
   } catch (err) { return String(err).slice(0, 120) }
 }
 
+// Last finished turn per chat (time and size), kept in the store so it survives an engine restart.
+type Idle = Record<string, { t: number; tokens: number }>
+const idleMap = async ($: any): Promise<Idle> => ((await $.store.get('idle').catch(() => undefined)) as Idle | undefined) ?? {}
+async function rememberIdle($: any, t: number, tokens: number) {
+  const m = await idleMap($)
+  m[await $.session.id().catch(() => '?')] = { t, tokens }
+  const keep = Object.entries(m).sort((a, b) => b[1].t - a[1].t).slice(0, SESSIONS)
+  await $.store.set('idle', Object.fromEntries(keep)).catch(() => {})
+}
+
 // Sends the pending note; it stays pending until a submit goes through.
 async function resend($: any, S: St): Promise<boolean> {
   const r = await $.prompt.submit({ text: `${HEAD}\n\n${S.pending}`, origin: ORIGIN }).catch(() => ({ drop: 'failed' }))
@@ -173,8 +185,14 @@ async function holdMessage($: any, e: any): Promise<{ drop: string } | undefined
     S.queue.push(e.text)
     return { drop: 'Held: it goes to the new chat with the handoff note.' }
   }
-  if (S.doneAt && S.tokens >= 50_000 && Date.now() - S.doneAt > IDLE_MS) {
-    $.ui.toast(`Idle ${Math.round((Date.now() - S.doneAt) / 60_000)} min: the saved copy has likely expired, so this message re-pays ~${Math.round(S.tokens / 1000)}k tokens. /switch handoff starts fresh.`)
+  // Idle hold: last turn time and size come from the store, so an engine restart does not forget them. A second send within 2 minutes goes through.
+  const last = S.doneAt ? { t: S.doneAt, tokens: S.tokens } : (await idleMap($))[await $.session.id().catch(() => '?')]
+  if (last && last.tokens >= IDLE_MIN_TOKENS && Date.now() - last.t > IDLE_MS) {
+    if (Date.now() - S.idleHeldAt > IDLE_RESEND_MS) {
+      S.idleHeldAt = Date.now()
+      return { drop: `Held: this chat was idle ${Math.round((Date.now() - last.t) / 60_000)} min, so its saved copy has likely expired and this message re-pays about ${Math.round(last.tokens / 1000)}k tokens. Send it again within 2 minutes to continue anyway, or type /switch handoff to start a fresh chat from a note.` }
+    }
+    S.doneAt = Date.now(); S.tokens = last.tokens; S.idleHeldAt = 0
   }
   S.run = 0; S.text = e.text.slice(0, 40)
   void regHelpers($, S) // after a /clear no session.start fires; registering again is harmless
@@ -250,6 +268,7 @@ export const register: Register = on => {
     if (e.agentId !== undefined) return out
     const S = await st($)
     S.doneAt = Date.now()
+    if (S.tokens) await rememberIdle($, S.doneAt, S.tokens)
     if (S.due && !S.busy && !S.scheduled && willRun(S)) { S.scheduled = true; $.clock.after(0, () => void handoff($, S)) }
 
     return out

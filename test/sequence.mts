@@ -19,6 +19,7 @@ async function make(o: any = {}) {
   const timers: (() => void)[] = []
   const files: Record<string, string> = { '/r/.claude-plugin/plugin.json': '{"version":"9.9.9"}', ...(o.files ?? {}) }
   const specs: any[] = []
+  const kv: Record<string, unknown> = o.kv ?? {} // the mod's saved store; pass it to a second make() to simulate an engine restart
   let sid = o.sid ?? 'sess1'
   let notes = 0
   const on = (ev: string, a: any, b?: any) => { (hooks[ev] ||= []).push(b ?? a); return { catch: () => ({}) } }
@@ -29,7 +30,7 @@ async function make(o: any = {}) {
     session: { id: async () => sid, cwd: async () => '/proj' },
     env: { get: async (k: string) => (k === 'HOME' ? HOME : undefined) },
     fs: { read: async (p: string) => { if (p in files) return files[p]; throw new Error('ENOENT ' + p) } },
-    store: { get: async () => undefined, set: async () => {} },
+    store: { get: async (k: string) => kv[k], set: async (k: string, v: unknown) => { kv[k] = v } },
     agent: { register: async (s: any) => { specs.push(s); return { agent: 'sage-relay:' + s.name } } },
     command: {
       register: async () => {},
@@ -82,7 +83,7 @@ async function make(o: any = {}) {
     }
   }
   return {
-    m, log, $, timers, files, specs, o, fork,
+    m, log, $, timers, files, specs, o, fork, kv,
     sid: () => sid, setSid: (s: string) => { sid = s },
     start: () => fire('session.start', { cwd: '/proj', surface: null, isInteractive: true }),
     measure: (tokens: number, fiveHour = 10, window = 1_000_000) => fire('session.measure', { context: { tokens, window }, rateLimits: [{ kind: 'five_hour', percentUsed: fiveHour }], changed: ['context'] }),
@@ -416,6 +417,37 @@ await scenario('R10 no Haiku anywhere in the hook code or the helper types', asy
   const h = await make(); await h.start()
   want(h.specs.every(s => !/haiku/i.test(s.model)), 'a helper type uses Haiku')
   const r = await h.sw('haiku'); want(/Usage/.test(r.text), '/switch haiku was accepted: ' + r.text)
+})
+
+await scenario('R11 idle hold: survives an engine restart, one resend goes through, short chats and recent ones are not held', async () => {
+  const real = Date.now
+  try {
+    const h1 = await make(); await h1.prompt('x'); await h1.measure(120_000); await h1.complete()
+    Date.now = () => real() + 30 * 60_000
+    const h30 = await make({ kv: h1.kv })
+    want((await h30.prompt('after 30 min')).drop === undefined, 'held after only 30 min')
+    Date.now = () => real() + 70 * 60_000
+    const h2 = await make({ kv: h1.kv }) // fresh module = engine restarted, memory empty, same chat id
+    const held: any = await h2.prompt('after the update')
+    want(/^Held: this chat was idle 70 min/.test(held.drop) && /120k tokens/.test(held.drop), 'not held after restart: ' + JSON.stringify(held))
+    want((await h2.prompt('after the update')).drop === undefined, 'second send did not go through')
+    const h3 = await make(); await h3.prompt('x'); await h3.measure(30_000); await h3.complete()
+    Date.now = () => real() + 200 * 60_000
+    const h4 = await make({ kv: h3.kv })
+    want((await h4.prompt('small chat')).drop === undefined, 'a 30k chat was held')
+  } finally { Date.now = real }
+})
+
+await scenario('R11b idle hold is per chat: chat B finishing a turn does not hide chat A being idle', async () => {
+  const real = Date.now
+  try {
+    const h = await make(); const A = h.fork('A'), B = h.fork('B')
+    await A.measure(120_000); await A.complete()
+    Date.now = () => real() + 70 * 60_000
+    await B.measure(80_000); await B.complete()
+    want(/^Held/.test(((await A.prompt('back again')) as any).drop ?? ''), 'chat A not held')
+    want(((await B.prompt('still here')) as any).drop === undefined, 'chat B held although it just finished a turn')
+  } finally { Date.now = real }
 })
 
 console.log(failed ? `${failed} FAILED` : 'all passed')
