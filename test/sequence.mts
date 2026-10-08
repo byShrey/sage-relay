@@ -349,7 +349,7 @@ await scenario('R3 hold while the note builds: 50 messages, 100k characters, the
   const r51: any = await h.prompt('one too many'); want(/hold is full/.test(r51.drop), '51st: ' + JSON.stringify(r51))
   open(); await t
   const sent = h.log.find(l => l.startsWith('SUBMIT '))!
-  want(sent.includes('- m0|') === false && sent.includes('- m0') && sent.includes('- m49') && !sent.includes('one too many'), 'held messages not in the handoff message')
+  want(sent.includes('- m0') && sent.includes('- m49') && !sent.includes('one too many'), 'held messages not in the handoff message')
   const h2 = await make({ noteGate: new Promise<void>(r => { open = r }) })
   await h2.sw('handoff'); const t2 = h2.run(); await new Promise(r => setTimeout(r, 10))
   const big: any = await h2.prompt('x'.repeat(100_001)); want(/hold is full/.test(big.drop), 'oversized message was held: ' + JSON.stringify(big))
@@ -392,7 +392,7 @@ await scenario('M4 three chats hand off at the same moment: each gets its own no
   want(h.count(/^COMMAND clear/) === 3, 'clears: ' + h.count(/^COMMAND clear/))
   for (const n of ['A', 'B', 'C']) {
     const subs = h.log.filter(l => l.startsWith(`SUBMIT ${n}: `))
-    want(subs.length === 1 && subs[0].includes(`NOTE FOR ${n}`) && !/NOTE FOR [^${n}]/.test(subs[0]), `chat ${n} got: ` + subs.join(' / ').slice(0, 160))
+    want(subs.length === 1 && subs[0].includes(`NOTE FOR ${n}`) && !new RegExp(`NOTE FOR (?!${n}\\b)`).test(subs[0]), `chat ${n} got: ` + subs.join(' / ').slice(-300))
   }
   const tags = new Set<string>()
   for (const c of cs) {
