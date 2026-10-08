@@ -1,11 +1,13 @@
 {
   "name": "sage-relay",
-  "owner": { "name": "byShrey" },
+  "owner": { "name": "byShrey", "url": "https://github.com/byShrey" },
   "plugins": [
     {
       "name": "sage-relay",
       "source": "./plugins/sage-relay",
-      "description": "Hands a long chat off to a fresh one automatically, with optional model routing for helper agents."
+      "version": "0.7.0",
+      "category": "productivity",
+      "description": "Automatic handoff for long Claude Code chats, with optional model routing for helper agents."
     }
   ]
 }

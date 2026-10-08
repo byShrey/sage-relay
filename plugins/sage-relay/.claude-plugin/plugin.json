@@ -1,1 +1,10 @@
-{ "name": "sage-relay", "version": "0.6.1", "description": "Hands a long chat off to a fresh one automatically (saves a full note, clears, carries on), with optional model routing for helper agents. No outside calls.", "license": "MIT" }
+{
+  "name": "sage-relay",
+  "version": "0.7.0",
+  "description": "Hands a long Claude Code chat off to a fresh one automatically: saves a full note, clears, carries on. Optional model routing with Deep, Careful and Scout helper agents.",
+  "author": { "name": "byShrey", "url": "https://github.com/byShrey" },
+  "homepage": "https://github.com/byShrey/sage-relay",
+  "repository": "https://github.com/byShrey/sage-relay",
+  "license": "MIT",
+  "keywords": ["handoff", "context-window", "long-chat", "model-routing", "claude-code"]
+}

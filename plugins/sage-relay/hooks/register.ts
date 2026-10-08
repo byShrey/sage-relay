@@ -4,194 +4,327 @@ type Effort = 'low' | 'medium' | 'high'
 type Pick = { model: string; effort?: Effort }
 
 const NAME = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-4-5-20251001' } as const
-// Cheapest last. Under pressure we step one rung down this ladder.
-// One effort per model: every model or effort change can cost a fresh cache write.
-const LADDER: Pick[] = [
-  { model: NAME.opus, effort: 'high' },
-  { model: NAME.sonnet, effort: 'medium' },
-  { model: NAME.haiku },
-]
-const LIMIT = 80
 const KEEP = 200
-// Main chat stays on one model so its saved copy stays warm; hard thinking goes to Opus helpers.
-// (The sticky per-message picker this replaced is kept as version 0.2.0 in the plugin cache.)
-const MAIN = 1
 // Long-chat handoff. Relay's note (whole conversation minus tool output) scored 29/30 in a blind test.
 const RELAY_SCRIPT = '/scripts/note.py' // bundled in the plugin, under $.plugin.root
-let CEILING = 300_000 // /switch ceiling N changes it for live tests
+const DEFAULT_CEILING = 300_000
+const FLOOR = 20_000 // lowest ceiling /switch ceiling or the file may set
 const MAX_RUN = 2 // handoffs in a row before the person types again
-const LIMIT_HARD = 95
+const LIMIT_HARD = 95 // 5-hour usage: one notice per limit window, never a clear
 const CEILING_FILE = '/.claude/sage-relay/ceiling' // optional file holding one number; lets a live test set the ceiling without typing
-const PIN_FILE = '/.claude/sage-relay/pin-models'
-const WARN = 250 / 300 // notice at this share of the ceiling
+const PIN_FILE = '/.claude/sage-relay/pin-models' // legacy: "on" in it switches routing on at first use
+const WARN = 250 / 300 // notice at this share of the handoff point
 const IDLE_MS = 55 * 60_000 // the saved copy expires after about an hour
 const GROWTH = 40_000 // after a handoff, wait for this much growth past the new chat's own start size
+const RETRY_GROWTH = 20_000 // after a failed note, try again once the chat has grown this much
+const MAX_FAILS = 3 // failed notes in a row before automatic handoff pauses for the chat
+const PY_RETRY_MS = 10 * 60_000 // look for python again this long after finding none
+const HOLD_MSGS = 50 // messages held while a note builds
+const HOLD_CHARS = 100_000 // and their total size
+const SESSIONS = 20 // state kept for this many recent chats in one process
+const HEAD = 'Continue from the handoff note below.'
+const ORIGIN = { kind: 'plugin', name: 'sage-relay' } as const
 
-export const pick = (rung: number, fiveHour: number): Pick =>
-  LADDER[Math.min(rung + (fiveHour >= LIMIT ? 1 : 0), LADDER.length - 1)]!
-
-// Helper type -> rung: planners/reviewers get Opus, read-only searchers Haiku, the rest Sonnet.
-export const helperRung = (type: string): number =>
-  /plan|architect|design|review/i.test(type) ? 0 : /explore|search|read/i.test(type) ? 2 : 1
+// Helpers that name no model (routing on only): planners/reviewers get Opus, read-only searchers Haiku, the rest Sonnet.
+// Covers the built-ins exactly too: Plan -> Opus, Explore -> Haiku.
+export const helperModel = (type: string): string =>
+  /plan|architect|design|review/i.test(type) ? NAME.opus : /explore|search|read/i.test(type) ? NAME.haiku : NAME.sonnet
 
 // claude-opus-5-5 -> "opus 5.5", claude-haiku-4-5-20251001 -> "haiku 4.5"
-const label = (p: Pick): string => {
-  const [, name, a, b] = p.model.split('-')
-  return `${name} ${a}.${b} ${p.effort ?? ''}`.trim()
+const label = (model: string, effort?: unknown): string => {
+  const [, name, a, b] = model.split('-')
+  return `${name} ${a}.${b} ${effort ?? ''}`.trim()
 }
 
-const S = { due: '' as '' | 'context' | 'limit', busy: false, run: 0, lastTag: '', pending: '', gated: false, prompts: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, doneAt: 0 }
+// Helper types the chat picks by reading their descriptions; always offered, routing on or off.
+const EASY = 'Easy questions, edits, explanations and small fixes: do not start a helper, just answer in the main chat. One keyword alone on a trivial ask is not enough.'
+const HELPER_PROMPT = "You work alone and start without the chat's history. Do exactly what the brief says, check your own result, and return a short result: the answer, then what you checked, then anything the caller must verify. Do not paste long working."
+export const HELPERS = [
+  { name: 'deep', model: NAME.opus, effort: 'high', description: `Use Deep for hard thinking: planning, design, architecture, research, comparing options, audits and reviews, root-cause hunting after a failed fix, anything with high stakes (deleting data, money, going public, changing a schema), a new system or many files, or real trade-offs with no obvious answer. Words like plan, design, research, audit, review, migrate, security are clues, but size, stakes and fuzziness decide; two or more signals means use it. ${EASY}` },
+  { name: 'careful', model: NAME.sonnet, effort: 'high', description: `Use Careful for well-defined multi-step work that needs more care than a quick edit: tests for known code, a one-file refactor, summarizing several documents, debugging with a clear repro. ${EASY}` },
+  { name: 'scout', model: NAME.haiku, description: `Use Scout for finding, listing, reading and searching with no judgement needed. ${EASY}` },
+].map(h => ({ ...h, prompt: HELPER_PROMPT, omitClaudeMd: true as const, maxTurns: h.name === 'scout' ? 20 : 40, ...(h.name === 'scout' && { tools: ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch'] }) })) // ponytail: no rules file in helpers (the brief carries what matters); Scout is read-only
 
-// Order matters: every note is built BEFORE /clear, so a failure keeps the chat. Fails open.
-export async function handoff($: any) {
-  S.busy = true
-  const reason = S.due
+const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0 })
+type St = ReturnType<typeof fresh>
+// State per chat: one module may serve several open chats. Oldest dropped past SESSIONS.
+export const M = new Map<string, St>()
+const stOf = (sid: string): St => {
+  const s = M.get(sid) ?? fresh()
+  M.delete(sid); M.set(sid, s)
+  if (M.size > SESSIONS) M.delete(M.keys().next().value!)
+  return s
+}
+const st = async ($: any) => stOf(await $.session.id().catch(() => '?'))
+// Per process: the ceiling file, the account-wide 5-hour reading, the routing default, python. Everything else is per chat.
+let tick = 0 // orders writes: a later write (file change or command) wins
+let file: { v: number | null; t: number } = { v: null, t: 0 }
+let fileSeen: string | null | undefined // ceiling file content at the last read
+let fiveHour = 0
+let limitNoticed = false
+let routingDefault: boolean | undefined // undefined until first use reads the legacy pin file
+let PY: string | null | undefined // the python that starts; null = none, handoff disabled
+let pyAt = 0 // when python was last probed
+
+// This chat's ceiling: its own /switch ceiling if that is the latest write, else the file, else the default.
+const ceilOf = (S: St): { v: number; src: 'default' | 'file' | 'command' } =>
+  S.cmd && S.cmd.t >= file.t ? { v: S.cmd.v, src: 'command' } : file.v !== null ? { v: file.v, src: 'file' } : { v: DEFAULT_CEILING, src: 'default' }
+const point = (S: St) => Math.max(Math.min(ceilOf(S).v, 0.8 * (S.window || Infinity)), S.base ? S.base + GROWTH : 0) // what actually triggers a handoff
+const willRun = (S: St) => S.auto && S.run < MAX_RUN && PY !== null
+const readHome = async ($: any, p: string): Promise<string | null> => {
+  try { return await $.fs.read(((await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? '') + p) } catch { return null }
+}
+const routingOn = async ($: any, S: St) => S.routing ?? (routingDefault ??= (await readHome($, PIN_FILE))?.trim() === 'on')
+
+async function syncCeiling($: any) {
+  const raw = await readHome($, CEILING_FILE)
+  if (raw === fileSeen) return
+  fileSeen = raw
+  const t = raw?.trim() ?? ''
+  if (/^\d+$/.test(t) && +t >= FLOOR) file = { v: +t, t: ++tick }
+  else if (raw === null) file = { ...file, v: null } // deleted: back to the default, but a later command still wins
+}
+
+// Python is probed once; if none was found, again after PY_RETRY_MS (called from measure and /switch handoff).
+const retryPy = () => { if (PY === null && Date.now() - pyAt > PY_RETRY_MS) PY = undefined }
+async function python($: any): Promise<string | null> {
+  if (PY !== undefined) return PY
+  pyAt = Date.now()
+  for (const py of ['python3', 'python', 'py', '/usr/bin/python3']) { // macOS's stub /usr/bin/python3 without developer tools fails the probe
+    const r = await $.process.run([py, '-c', 'import sys;print(1 if sys.version_info>=(3,9) else 0)'], { timeoutMs: 10_000 }).catch(() => null)
+    if (r?.exitCode === 0 && r.stdout.trim() === '1') return (PY = py)
+  }
+  return (PY = null)
+}
+
+async function gitStatus($: any, cwd: string): Promise<string> {
+  const r = await $.process.run(['git', 'status', '--porcelain'], { cwd, timeoutMs: 2000 }).catch(() => null)
+  if (!r) return '(git unavailable)'
+  if (r.exitCode !== 0) return '(not a git repo)'
+  const lines: string[] = r.stdout.split('\n').map((l: string) => l.trimEnd()).filter(Boolean) // keep the leading status column
+  return lines.length ? lines.slice(0, 20).join('\n').slice(0, 3000) + (lines.length > 20 ? `\n+${lines.length - 20} more` : '') : '(clean)'
+}
+
+// The note, or why it failed. Never clears anything.
+async function buildNote($: any, S: St): Promise<{ tag: string; text: string } | string> {
+  const py = await python($)
+  if (!py) return 'no python3'
+  try {
+    const cwd = await $.session.cwd()
+    const r = await $.process.run([py, $.plugin.root + RELAY_SCRIPT], { cwd, stdin: JSON.stringify({ cwd, session_id: await $.session.id(), parent: S.lastTag || undefined }), timeoutMs: 120_000 })
+    const o = r.exitCode === 0 ? JSON.parse(r.stdout) : null
+    return o?.text && o.tag ? o : (r.stderr.trim() || 'empty note').slice(0, 120)
+  } catch (err) { return String(err).slice(0, 120) }
+}
+
+// Sends the pending note; it stays pending until a submit goes through.
+async function resend($: any, S: St): Promise<boolean> {
+  const r = await $.prompt.submit({ text: `${HEAD}\n\n${S.pending}`, origin: ORIGIN }).catch(() => ({ drop: 'failed' }))
+  if (r.drop !== undefined) { $.ui.status('chat cleared, type /switch resend'); $.ui.toast('Handoff note not delivered: chat cleared, type /switch resend'); return false }
+  S.pending = ''
+  return true
+}
+
+// Order matters: the note is built BEFORE /clear, so a failure keeps the chat.
+export async function handoff($: any, S: St) {
+  S.scheduled = false
+  if (S.busy) return
+  S.busy = true; S.cleared = false; S.last = S.tokens
   try {
     $.ui.status('handing off…')
-    const sid = await $.session.id()
     const cwd = await $.session.cwd()
-    const git = await $.process.run(['git', 'status', '--short'], { cwd, timeoutMs: 5000 }).then((r: any) => r.stdout.trim() || '(clean)').catch(() => '(git unavailable)')
-    const backup = `Facts only (the full note failed).\nLast requests:\n${S.prompts.map(p => `- ${p.slice(0, 300)}`).join('\n')}`
-    let body = backup
-    let tag = S.lastTag
-    try {
-      const r = await $.process.run(['/usr/bin/python3', $.plugin.root + RELAY_SCRIPT], { cwd, stdin: JSON.stringify({ cwd, session_id: sid, parent: S.lastTag || undefined }), timeoutMs: 120_000 })
-      const o = JSON.parse(r.stdout)
-      if (r.exitCode !== 0 || !o.text) throw new Error('relay')
-      body = o.text; tag = o.tag
-    } catch { $.ui.toast('handoff: full note failed, using a facts-only one') }
-    const status = reason === 'limit' || !S.gated ? 'WAIT' : 'CONTINUE'
-    S.pending = `STATUS: ${status}\n${status === 'WAIT' ? 'Say where things stand in one line, then wait for the person.' : 'Carry on from the next step in the note.'}\n\nGit status:\n${git}\n\n${body}`
+    const [git, note] = await Promise.all([gitStatus($, cwd), buildNote($, S)])
+    if (typeof note === 'string') {
+      if (PY === null) $.ui.toast('Sage Relay: handoff needs python3. Automatic handoff is off; the chat is kept.')
+      else if (++S.fails >= MAX_FAILS) { S.auto = false; $.ui.toast(`Sage Relay: note failed ${S.fails} times, chat kept (${note}). Automatic handoff paused for this chat; /switch handoff tries again.`) }
+      else { S.retryAt = S.tokens + RETRY_GROWTH; $.ui.toast(`Sage Relay: note failed, chat kept (${note}). Trying again after ${RETRY_GROWTH / 1000}k more tokens (${S.fails}/${MAX_FAILS}).`) }
+      $.ui.status('note failed, chat kept')
+      return
+    }
+    const status = S.due === 'context' && S.gated ? 'CONTINUE' : 'WAIT'
+    const old = await $.session.id()
     await $.command.run({ command: 'clear' })
-    S.lastTag = tag
-    const r = await $.prompt.submit({ text: `Continue from the handoff note below.\n\n${S.pending}`, origin: { kind: 'plugin', name: 'sage-relay' } })
-    if ('drop' in r) { $.ui.toast('handoff note not delivered; type /switch resend'); return }
-    S.run++
-    S.fresh = true; S.base = 0
-    $.ui.status(`handed off (${S.run}/${MAX_RUN})`)
-    S.pending = ''
+    S.cleared = true; S.lastTag = note.tag; S.run++; S.fresh = true; S.base = 0; S.warned = false; S.reg = false; S.fails = 0; S.retryAt = 0
+    M.delete(old); M.set(await $.session.id().catch(() => old), S) // the new chat carries this state
+    const typed = S.queue.length ? `\n\nWhile the handoff ran, the person also typed:\n${S.queue.map(q => `- ${q}`).join('\n')}` : ''
+    S.pending = `STATUS: ${status}\n${status === 'WAIT' ? "First show the person the note's 'Where it stopped' section in full, word for word. Then say where things stand in one line and wait for them." : 'Carry on from the next step in the note.'}\n\nGit status:\n${git}\n\n${note.text}${typed}`
+    if (await resend($, S)) $.ui.status(`handed off (${S.run}/${MAX_RUN})`)
   } catch (err) {
-    S.pending = ''
-    $.ui.status(`handoff failed, chat kept: ${String(err).slice(0, 80)}`)
+    $.ui.status(S.cleared ? 'chat cleared, type /switch resend' : `handoff failed, chat kept: ${String(err).slice(0, 80)}`)
   } finally {
-    S.busy = false; S.due = ''; S.gated = false
+    // Messages held while the note was built go back in if the chat was kept.
+    if (!S.cleared && S.queue.length) void $.prompt.submit({ text: S.queue.join('\n\n'), origin: ORIGIN }).catch(() => {})
+    S.busy = false; S.due = ''; S.gated = false; S.queue = []
   }
 }
 
+const regHelpers = async ($: any, S: St) => {
+  if (S.reg) return
+  S.reg = true
+  S.reg = await Promise.all(HELPERS.map(h => $.agent.register(h))).then(() => true, () => false)
+}
+
+// prompt.submit: while the note builds, hold what the person types (it goes to the new chat); returns the drop, or nothing to pass it on.
+async function holdMessage($: any, e: any): Promise<{ drop: string } | undefined> {
+  if (e.origin.kind !== 'composer' && e.origin.kind !== 'bridge') return
+  const S = await st($)
+  if (S.busy && !S.cleared) {
+    if (S.queue.length >= HOLD_MSGS || S.queue.reduce((n, q) => n + q.length, 0) + e.text.length > HOLD_CHARS) return { drop: 'Handoff is running and the hold is full. Wait for the new chat, then send this again.' }
+    S.queue.push(e.text)
+    return { drop: 'Held: it goes to the new chat with the handoff note.' }
+  }
+  if (S.doneAt && S.tokens >= 50_000 && Date.now() - S.doneAt > IDLE_MS) {
+    $.ui.toast(`Idle ${Math.round((Date.now() - S.doneAt) / 60_000)} min: the saved copy has likely expired, so this message re-pays ~${Math.round(S.tokens / 1000)}k tokens. /switch handoff starts fresh.`)
+  }
+  S.run = 0; S.text = e.text.slice(0, 40)
+  void regHelpers($, S) // after a /clear no session.start fires; registering again is harmless
+}
+
+// tool.call: past the line (or while the note is built) deny new main-chat tool calls; says whether this is a plan approval to watch.
+async function toolGate($: any, e: any): Promise<{ deny?: { deny: string }; plan?: St }> {
+  if (e.agentId !== undefined) return {}
+  const S = await st($)
+  if (S.busy || S.scheduled || (S.due && willRun(S))) { S.gated = true; return { deny: { deny: 'Handoff pending: make no more tool calls. Write one line saying where you are.' } } }
+  return e.tool === 'ExitPlanMode' && !(await routingOn($, S)) ? { plan: S } : {}
+}
+
+// agent.spawn: with routing on, a helper that names no model gets one. An explicit model from the caller, or a plugin type's own, wins.
+async function spawnModel($: any, e: any): Promise<string | undefined> {
+  if (e.model !== undefined || e.subagentType.includes(':') || !(await routingOn($, await st($)))) return
+  return helperModel(e.subagentType)
+}
+
 export const register: Register = on => {
-  let text = ''
-  let fiveHour = 0
-  let base = ''
-  let mode: 'auto' | 'off' | Pick = 'off' // model pinning is opt-in: put the word on in ~/.claude/sage-relay/pin-models (or type /switch auto)
-
-  let pinRead = false // the pin file is read once, on first use
-
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'switch', description: 'Model switchboard', argumentHint: '[opus|sonnet|haiku [low|medium|high]] | auto | off | log' })
+    await $.command.register({ name: 'switch', description: 'Sage Relay: handoff and routing', argumentHint: 'status | note | handoff [on|off] | resend | ceiling N | routing on|off | log' })
+    await regHelpers($, await st($))
 
     return next(e)
   })
 
-  on('prompt.submit', ($, e, next) => {
-    text = e.text
-    if (e.origin.kind === 'composer' && S.doneAt && S.tokens >= 50_000 && Date.now() - S.doneAt > IDLE_MS) {
-      $.ui.toast(`Idle ${Math.round((Date.now() - S.doneAt) / 60_000)} min: the saved copy has likely expired, so this message re-pays ~${Math.round(S.tokens / 1000)}k tokens. /switch handoff starts fresh.`)
-    }
-    if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') { S.run = 0; S.prompts.push(e.text); S.prompts.splice(0, S.prompts.length - 6) }
+  // A /clear the person typed starts over: no parent tag, no stale state. Our own clear runs while busy.
+  on('session.end', ($, e, next) => {
+    if (e.reason === 'clear' && !M.get(e.sessionId)?.busy) M.delete(e.sessionId)
 
     return next(e)
   })
+
+  // A gate that crashes is absent: the message, tool call or helper goes through. .catch says so out loud.
+  on('prompt.submit', async ($, e, next) => (await holdMessage($, e)) ?? next(e)).catch(() => undefined)
 
   on('session.measure', async ($, e, next) => {
-    fiveHour = e.rateLimits.find(r => r.kind === 'five_hour')?.percentUsed ?? 0
+    const fh = e.rateLimits.find(r => r.kind === 'five_hour')?.percentUsed
+    if (fh !== undefined) {
+      fiveHour = fh
+      if (fh < LIMIT_HARD) limitNoticed = false
+      else if (!limitNoticed) { limitNoticed = true; $.ui.toast(`5-hour limit at ${fh}%. /switch handoff saves a note and starts a fresh chat if you want one.`) }
+    }
+    await syncCeiling($); retryPy()
+    const S = await st($)
     const tokens = e.context.tokens
-    if (tokens !== undefined) S.tokens = tokens
-    try {
-      const n = Number((await $.process.run(['/bin/cat', ((await $.env.get('HOME')) ?? '') + CEILING_FILE], { timeoutMs: 2000 })).stdout.trim())
-      if (n >= 1000) CEILING = n
-    } catch { /* no file: keep the current ceiling */ }
-    const limit = Math.max(Math.min(CEILING, 0.8 * e.context.window), S.base ? S.base + GROWTH : 0) // what actually triggers a handoff
-    if (tokens !== undefined && S.fresh) {
-      if (tokens < S.last * 0.9) { S.base = tokens; S.fresh = false; S.warned = false } // first reading from the new chat; older ones are stale
-    } else if (tokens !== undefined && tokens >= limit) {
-      S.due ||= 'context'
-      S.last = tokens
-    }
-    if (fiveHour >= LIMIT_HARD) S.due = 'limit'
-    else if (tokens !== undefined && !S.warned && !S.due && tokens >= WARN * limit) {
+    if (tokens === undefined || S.busy) return next(e)
+    S.tokens = tokens; S.window = e.context.window
+    if (S.fresh) { S.base = tokens; S.fresh = false; S.warned = false; return next(e) } // first reading from the new chat, whatever its size
+    const at = point(S)
+    if (tokens >= Math.max(at, S.retryAt)) S.due ||= 'context'
+    else if (!S.warned && !S.due && !S.retryAt && tokens >= WARN * at) {
       S.warned = true
-      $.ui.toast(`Chat is at ${Math.round(tokens / 1000)}k tokens; it hands off at ${Math.round(limit / 1000)}k. /switch handoff does it now.`)
+      $.ui.toast(`Chat is at ${Math.round(tokens / 1000)}k tokens; it hands off at ${Math.round(at / 1000)}k. /switch handoff does it now.`)
     }
 
     return next(e)
   })
 
-  // Past the line, stop new tool calls so one huge read cannot overshoot; the turn then ends and the handoff runs.
-  on('tool.call', ($, e, next) => {
-    if (S.due && e.agentId === undefined && !S.busy) { S.gated = true; return { deny: 'Handoff pending: make no more tool calls. Write one line saying where you are.' } }
+  on('tool.call', async ($, e, next) => {
+    const g = await toolGate($, e)
+    if (g.deny) return g.deny
+    if (!g.plan) return next(e)
+    const r: any = await next(e) // the person approves or rejects the plan inside this call
+    if (r.result && !r.isError && !r.result.awaitingLeaderApproval) { g.plan.routing = true; $.ui.toast('Plan approved: Sage Relay routing is on for this chat. /switch routing off stops it.') }
 
-    return next(e)
-  })
+    return r
+  }).catch(() => undefined)
 
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
-    if (e.agentId === undefined) S.doneAt = Date.now()
-    if (e.agentId === undefined && S.due && !S.busy && S.run < MAX_RUN) $.clock.after(0, () => void handoff($))
+    if (e.agentId !== undefined) return out
+    const S = await st($)
+    S.doneAt = Date.now()
+    if (S.due && !S.busy && !S.scheduled && willRun(S)) { S.scheduled = true; $.clock.after(0, () => void handoff($, S)) }
 
     return out
   })
 
-  // The session's own model only changes when the person picks one in the menu: then we stop.
+  // The main chat keeps the person's menu pick. Only a /switch opus|sonnet|haiku they typed overrides it, until they pick in the menu.
   on('turn.step', async function* ($, e, next) {
-    if (!pinRead) {
-      pinRead = true
-      try {
-        const v = (await $.process.run(['/bin/cat', ((await $.env.get('HOME')) ?? '') + PIN_FILE], { timeoutMs: 2000 })).stdout.trim()
-        if (v === 'on') mode = 'auto'
-      } catch { /* no file: pinning stays off */ }
-    }
-    if (e.agentId !== undefined || mode === 'off') return yield* next(e)
-    if (base === '') base = e.model
-    if (e.model !== base) { mode = 'off'; $.ui.status('switchboard off: you picked a model'); return yield* next(e) }
-
-    const p = mode === 'auto' ? pick(MAIN, fiveHour) : mode
-    if (e.index === 0) { // one line per reply, not per tool step
+    if (e.agentId !== undefined) return yield* next(e)
+    const S = await st($)
+    if (S.fixed && (S.menu ||= e.model) !== e.model) { S.fixed = undefined; $.ui.status('fixed model off: you picked one in the menu') }
+    const f = S.fixed
+    if (e.index === 0 && (f || await routingOn($, S))) { // one line per reply, the model that runs
       const chat = (await $.session.id().catch(() => '?')).slice(0, 4)
-      const why = mode === 'auto' ? `${chat} | ${text.slice(0, 40).replace(/\s+/g, ' ')} | 5h ${fiveHour}%` : `${chat} | manual`
       const log = ((await $.store.get('log')) as string[] | undefined) ?? []
-      await $.store.set('log', [...log, `${label(p)} | ${why}`].slice(-KEEP))
-      $.ui.status(`${label(p)} · ${mode === 'auto' ? 'auto' : 'set'}`)
+      await $.store.set('log', [...log, `${f ? label(f.model, f.effort) : label(e.model, e.effort)} | ${chat} | ${f ? 'fixed' : `${S.text.replace(/\s+/g, ' ')} | 5h ${fiveHour}%`}`].slice(-KEEP))
     }
 
-    return yield* next({ ...e, model: p.model, ...(p.effort ? { effort: p.effort } : {}) })
+    return yield* next(f ? { ...e, model: f.model, ...(f.effort ? { effort: f.effort } : {}) } : e)
   })
 
-  // An explicit model from the caller always wins.
+  // AgentSpawnInput has no effort field, so effort comes only from the helper types' own definitions.
   on('agent.spawn', async ($, e, next) => {
-    if (!pinRead) {
-      pinRead = true
-      try {
-        const v = (await $.process.run(['/bin/cat', ((await $.env.get('HOME')) ?? '') + PIN_FILE], { timeoutMs: 2000 })).stdout.trim()
-        if (v === 'on') mode = 'auto'
-      } catch { /* no file: pinning stays off */ }
-    }
+    const model = await spawnModel($, e)
 
-    return next(e.model !== undefined || mode === 'off' ? e : { ...e, model: pick(helperRung(e.subagentType), fiveHour).model })
-  })
+    return next(model ? { ...e, model } : e)
+  }).catch(() => undefined)
 
   on('command.run', { command: 'switch' }, async ($, e) => {
-    const [a = '', b = 'high'] = e.args.trim().toLowerCase().split(/\s+/)
-    if (a === 'auto' || a === 'off') { mode = a; if (a === 'auto') base = ''; return { text: `switchboard ${a}` } }
-    if (a === 'resend' && S.pending) { await $.prompt.submit({ text: `Continue from the handoff note below.\n\n${S.pending}`, origin: { kind: 'plugin', name: 'sage-relay' } }); S.pending = ''; return { text: 'resent' } }
-    if (a === 'handoff') { S.due ||= 'context'; S.gated = true; $.clock.after(0, () => void handoff($)); return { text: 'handoff starting after this turn' } }
-    if (a === 'ceiling') { CEILING = Number(b) || 300_000; return { text: `handoff ceiling ${CEILING}` } }
+    const [a = '', b = ''] = e.args.trim().toLowerCase().split(/\s+/)
+    const S = await st($)
+    if (a === 'routing' && (b === 'on' || b === 'off')) { S.routing = b === 'on'; return { text: `routing ${b} for this chat` } }
+    if (a === 'auto') { S.routing = true; return { text: 'routing on for this chat' } } // legacy alias
+    if (a === 'off') { S.routing = false; S.fixed = undefined; return { text: 'routing off for this chat, no fixed model' } }
+    if (a === 'resend') return { text: !S.pending ? 'nothing to resend' : await resend($, S) ? 'resent' : 'not delivered; the note is kept, try /switch resend again' }
+    if (a === 'handoff' && (b === 'on' || b === 'off')) { S.auto = b === 'on'; S.fails = 0; S.retryAt = 0; return { text: `automatic handoff ${b} for this chat` } }
+    if (a === 'handoff') {
+      if (S.busy || S.scheduled) return { text: 'a handoff is already running' }
+      retryPy()
+      if (PY === null) return { text: 'handoff needs python3 (3.9 or newer); the chat is kept' }
+      S.due = 'manual'; S.scheduled = true; $.clock.after(0, () => void handoff($, S))
+      return { text: 'handoff starting after this turn' }
+    }
+    if (a === 'ceiling') {
+      if (!/^\d+$/.test(b) || +b < FLOOR) return { text: `the ceiling must be a whole number of at least ${FLOOR}; it stays ${ceilOf(S).v}` }
+      await syncCeiling($) // a file change made before this command must not override it
+      S.cmd = { v: +b, t: ++tick }
+      return { text: `handoff ceiling ${b} for this chat` }
+    }
     if (a === 'log') return { text: (((await $.store.get('log')) as string[] | undefined) ?? ['(empty)']).slice(-10).join('\n') }
-    if (a in NAME && ['low', 'medium', 'high'].includes(b)) {
-      mode = { model: NAME[a as keyof typeof NAME], effort: a === 'haiku' ? undefined : (b as Effort) }
+    if (a === 'note') {
+      if (S.busy) return { text: 'a handoff is running' }
+      const n = await buildNote($, S)
+      if (typeof n === 'string') return { text: `note failed, chat kept: ${n}` }
+      return { text: `note ${n.tag}: ${n.text.length} chars, about ${Math.round(n.text.length / 4000)}k tokens, saved as ~/.claude/sage-relay/notes/<project>/${n.tag}.md. Not sent, chat not cleared.\n\n${n.text.slice(0, 600)}` }
+    }
+    if (a === 'status') {
+      await syncCeiling($)
+      const ceil = ceilOf(S)
+      const ver = await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json').then((t: string) => JSON.parse(t).version, () => '?')
+      return { text: [
+        `Sage Relay ${ver}`,
+        `chat ${Math.round(S.tokens / 1000)}k tokens; hands off at ${Math.round(point(S) / 1000)}k (ceiling ${ceil.v} from ${ceil.src}${S.base ? `; this chat started at ${Math.round(S.base / 1000)}k after a handoff at ${Math.round(S.last / 1000)}k` : ''})`,
+        `automatic handoff ${S.auto ? 'on' : 'off'} for this chat${S.fails ? `; ${S.fails}/${MAX_FAILS} failed notes, next try at ${Math.round(S.retryAt / 1000)}k` : ''}; python ${PY === null ? 'missing' : PY ?? 'not checked yet'}`,
+        `due ${S.due || 'no'}, scheduled ${S.scheduled}, busy ${S.busy}, fresh ${S.fresh}, handoffs in a row ${S.run}/${MAX_RUN}`,
+        `routing ${(await routingOn($, S)) ? 'on' : 'off'} for this chat${S.fixed ? `; fixed to ${label(S.fixed.model, S.fixed.effort)}` : ''}; 5h ${fiveHour}%`,
+        `last note ${S.lastTag || 'none'}${S.pending ? '; one waiting, /switch resend' : ''}`,
+      ].join('\n') }
+    }
+    if (a in NAME && ['', 'low', 'medium', 'high'].includes(b)) {
+      S.fixed = { model: NAME[a as keyof typeof NAME], effort: a === 'haiku' ? undefined : ((b || 'high') as Effort) }; S.menu = ''
 
-      return { text: `fixed to ${label(mode)} until /switch auto` }
+      return { text: `fixed to ${label(S.fixed.model, S.fixed.effort)} until /switch off or a menu pick` }
     }
 
-    return { text: 'Usage: /switch opus high | sonnet medium | haiku | auto | off | log' }
+    return { text: 'Usage: /switch status | note | handoff [on|off] | resend | ceiling N | routing on|off | log | opus|sonnet [low|medium|high] | haiku (a fixed model for this chat) | off (routing off, no fixed model). auto = routing on (legacy).' }
   })
 }
+
