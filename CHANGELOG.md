@@ -26,6 +26,11 @@
 **New commands**: `/switch status`, `/switch note` (preview without clearing), `/switch handoff off|on`.
 **Other**: ceiling floor of 20k, latest write wins between the command and the file; CI runs the tests on every push.
 
+**Measured (one handoff, small samples)**
+- A fresh chat after a handoff opened at 82k tokens, against 190k with 0.6.1.
+- Blind 30-question test: this note 28.5/30, 0.6.1 note 26.0/30, built-in compaction 15.5/30.
+- Building a note from an 87 MB chat took 0.4 s and 31 MB of memory.
+
 ## 0.6.1
 - Notice now reports the real handoff point, including the 40k wait after a handoff.
 - Bundled note builder (`scripts/note.py`) is standard library only and has no personal paths.
