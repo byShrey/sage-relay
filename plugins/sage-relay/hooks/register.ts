@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 type Effort = 'low' | 'medium' | 'high'
 type Pick = { model: string; effort?: Effort }
 
-const NAME = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-4-5-20251001' } as const
+const NAME = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5' } as const // no Haiku: a wrong "not found" costs more than the saving
 const KEEP = 200
 // Long-chat handoff. Relay's note (whole conversation minus tool output) scored 29/30 in a blind test.
 const RELAY_SCRIPT = '/scripts/note.py' // bundled in the plugin, under $.plugin.root
@@ -25,12 +25,12 @@ const SESSIONS = 20 // state kept for this many recent chats in one process
 const HEAD = 'Continue from the handoff note below.'
 const ORIGIN = { kind: 'plugin', name: 'sage-relay' } as const
 
-// Helpers that name no model (routing on only): planners/reviewers get Opus, read-only searchers Haiku, the rest Sonnet.
-// Covers the built-ins exactly too: Plan -> Opus, Explore -> Haiku.
+// Helpers that name no model (routing on only): planners/reviewers get Opus, everything else Sonnet.
+// Covers the built-ins exactly too: Plan -> Opus, Explore -> Sonnet.
 export const helperModel = (type: string): string =>
-  /plan|architect|design|review/i.test(type) ? NAME.opus : /explore|search|read/i.test(type) ? NAME.haiku : NAME.sonnet
+  /plan|architect|design|review/i.test(type) ? NAME.opus : NAME.sonnet
 
-// claude-opus-5-5 -> "opus 5.5", claude-haiku-4-5-20251001 -> "haiku 4.5"
+// claude-opus-5-5 -> "opus 5.5"
 const label = (model: string, effort?: unknown): string => {
   const [, name, a, b] = model.split('-')
   return `${name} ${a}.${b} ${effort ?? ''}`.trim()
@@ -42,7 +42,7 @@ const HELPER_PROMPT = "You work alone and start without the chat's history. Do e
 export const HELPERS = [
   { name: 'deep', model: NAME.opus, effort: 'high', description: `Use Deep for hard thinking: planning, design, architecture, research, comparing options, audits and reviews, root-cause hunting after a failed fix, anything with high stakes (deleting data, money, going public, changing a schema), a new system or many files, or real trade-offs with no obvious answer. Words like plan, design, research, audit, review, migrate, security are clues, but size, stakes and fuzziness decide; two or more signals means use it. ${EASY}` },
   { name: 'careful', model: NAME.sonnet, effort: 'high', description: `Use Careful for well-defined multi-step work that needs more care than a quick edit: tests for known code, a one-file refactor, summarizing several documents, debugging with a clear repro. ${EASY}` },
-  { name: 'scout', model: NAME.haiku, description: `Use Scout for finding, listing, reading and searching with no judgement needed. ${EASY}` },
+  { name: 'scout', model: NAME.sonnet, description: `Use Scout for finding, listing, reading and searching with no judgement needed. ${EASY}` },
 ].map(h => ({ ...h, prompt: HELPER_PROMPT, omitClaudeMd: true as const, maxTurns: h.name === 'scout' ? 20 : 40, ...(h.name === 'scout' && { tools: ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch'] }) })) // ponytail: no rules file in helpers (the brief carries what matters); Scout is read-only
 
 const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0 })
@@ -255,7 +255,7 @@ export const register: Register = on => {
     return out
   })
 
-  // The main chat keeps the person's menu pick. Only a /switch opus|sonnet|haiku they typed overrides it, until they pick in the menu.
+  // The main chat keeps the person's menu pick. Only a /switch opus|sonnet they typed overrides it, until they pick in the menu.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) return yield* next(e)
     const S = await st($)
@@ -319,12 +319,12 @@ export const register: Register = on => {
       ].join('\n') }
     }
     if (a in NAME && ['', 'low', 'medium', 'high'].includes(b)) {
-      S.fixed = { model: NAME[a as keyof typeof NAME], effort: a === 'haiku' ? undefined : ((b || 'high') as Effort) }; S.menu = ''
+      S.fixed = { model: NAME[a as keyof typeof NAME], effort: (b || 'high') as Effort }; S.menu = ''
 
       return { text: `fixed to ${label(S.fixed.model, S.fixed.effort)} until /switch off or a menu pick` }
     }
 
-    return { text: 'Usage: /switch status | note | handoff [on|off] | resend | ceiling N | routing on|off | log | opus|sonnet [low|medium|high] | haiku (a fixed model for this chat) | off (routing off, no fixed model). auto = routing on (legacy).' }
+    return { text: 'Usage: /switch status | note | handoff [on|off] | resend | ceiling N | routing on|off | log | opus|sonnet [low|medium|high] (a fixed model for this chat) | off (routing off, no fixed model). auto = routing on (legacy).' }
   })
 }
 

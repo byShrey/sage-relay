@@ -265,7 +265,7 @@ await scenario('routing off by default: models untouched; pin file "on" routes h
   const h2 = await make({ files: { [HOME + '/.claude/sage-relay/pin-models']: 'on\n' } })
   const s2 = await h2.step(); want(s2.model === 'claude-sonnet-5-5' && s2.effort === 'low', 'routing on changed the main model: ' + JSON.stringify(s2))
   want((await h2.spawn({ subagentType: 'Plan', prompt: 'x' })).model === 'claude-opus-5-5', 'Plan not on Opus')
-  want((await h2.spawn({ subagentType: 'Explore', prompt: 'x' })).model === 'claude-haiku-4-5-20251001', 'Explore not on Haiku')
+  want((await h2.spawn({ subagentType: 'Explore', prompt: 'x' })).model === 'claude-sonnet-5-5', 'Explore not on Sonnet')
   want((await h2.spawn({ subagentType: 'sage-relay:scout', prompt: 'x' })).model === undefined, 'a plugin type\'s own model overridden')
   await h.sw('routing on'); want((await h.spawn({ subagentType: 'Plan', prompt: 'x' })).model === 'claude-opus-5-5', '/switch routing on did nothing')
 })
@@ -273,7 +273,7 @@ await scenario('routing off by default: models untouched; pin file "on" routes h
 await scenario('helper types registered with the right model and effort, again after a /clear', async () => {
   const h = await make(); await h.start()
   const got = h.specs.map(s => `${s.name}:${s.model}:${s.effort ?? '-'}`).join(' ')
-  want(got === 'deep:claude-opus-5-5:high careful:claude-sonnet-5-5:high scout:claude-haiku-4-5-20251001:-', 'specs: ' + got)
+  want(got === 'deep:claude-opus-5-5:high careful:claude-sonnet-5-5:high scout:claude-sonnet-5-5:-', 'specs: ' + got)
   want(h.specs.every(s => /Do not paste long working/.test(s.prompt) && /do not start a helper/.test(s.description)), 'prompt or rubric missing')
   await h.userClear(); await h.prompt('hi'); await new Promise(r => setTimeout(r, 10))
   want(h.specs.length === 6, 'not registered again after a /clear: ' + h.specs.length)
@@ -401,6 +401,21 @@ await scenario('M4 three chats hand off at the same moment: each gets its own no
     tags.add(s.match(/last note (tag\d+)/)![1])
   }
   want(tags.size === 3, 'chats share a note tag: ' + [...tags].join(','))
+})
+
+await scenario('R9 main chat never steps down for usage: 99% of the 5-hour limit keeps the model on every step', async () => {
+  const h = await make({ files: { [HOME + '/.claude/sage-relay/pin-models']: 'on\n' } })
+  await h.prompt('x'); await h.measure(60_000, 99)
+  for (const i of [0, 1, 2]) { const s = await h.step('claude-sonnet-5-5', i); want(s.model === 'claude-sonnet-5-5', `step ${i} became ${s.model}`) }
+  const s = await h.step('claude-opus-5-5'); want(s.model === 'claude-opus-5-5', 'opus pick changed at 99%: ' + s.model)
+})
+
+await scenario('R10 no Haiku anywhere in the hook code or the helper types', async () => {
+  const src = (await import('node:fs')).readFileSync(SRC, 'utf8').replace(/^.*\/\/ no Haiku.*$/m, '')
+  want(!/haiku/i.test(src), 'haiku still in register.ts')
+  const h = await make(); await h.start()
+  want(h.specs.every(s => !/haiku/i.test(s.model)), 'a helper type uses Haiku')
+  const r = await h.sw('haiku'); want(/Usage/.test(r.text), '/switch haiku was accepted: ' + r.text)
 })
 
 console.log(failed ? `${failed} FAILED` : 'all passed')

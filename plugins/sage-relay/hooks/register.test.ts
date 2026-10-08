@@ -69,8 +69,8 @@ test('routing on: Plan helpers go to Opus', async ($, on) => {
   expect(await spawned($, on, { subagentType: 'Plan' })).toBe('claude-opus-5-5')
 })
 
-test('routing on: Explore helpers go to Haiku', async ($, on) => {
-  expect(await spawned($, on, { subagentType: 'Explore' })).toBe('claude-haiku-4-5-20251001')
+test('routing on: Explore helpers go to Sonnet', async ($, on) => {
+  expect(await spawned($, on, { subagentType: 'Explore' })).toBe('claude-sonnet-5-5')
 })
 
 test('routing on: other helpers go to Sonnet', async ($, on) => {
@@ -92,7 +92,7 @@ test('three helper types are registered at session start', async ($, on) => {
   on('session.start', (_$: any, e: any) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'reg' }))
   await $.session.start({ cwd: '/p', surface: null, isInteractive: false })
-  expect(specs.map(s => `${s.name} ${s.model} ${s.effort ?? '-'}`).join(', ')).toBe('deep claude-opus-5-5 high, careful claude-sonnet-5-5 high, scout claude-haiku-4-5-20251001 -')
+  expect(specs.map(s => `${s.name} ${s.model} ${s.effort ?? '-'}`).join(', ')).toBe('deep claude-opus-5-5 high, careful claude-sonnet-5-5 high, scout claude-sonnet-5-5 -')
 })
 
 // ---- handoff trigger ----
