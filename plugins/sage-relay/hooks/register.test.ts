@@ -155,10 +155,10 @@ test('tool gate denies once a handoff is due, and lifts when it will not run', a
   on('tool.call', () => ({ result: 'ran' }))
   await measure($, 310_000)
   const r = await $.tool.call({ tool: 'Read', file_path: '/tmp/x' })
-  expect(String(r.deny ?? r.text)).toContain('Handoff pending')
+  expect(String(r.deny ?? r.text)).toContain('not a token or usage limit')
   await $.command.run({ command: 'switch', args: 'handoff off' })
   const r2 = await $.tool.call({ tool: 'Read', file_path: '/tmp/x' })
-  expect(String(r2.deny ?? r2.text)).not.toContain('Handoff pending')
+  expect(String(r2.deny ?? r2.text)).not.toContain('not a token or usage limit')
 })
 
 // The whole handoff (git, note, clear, submit) with every outside call stubbed. The chat id changes at the clear.

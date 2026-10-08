@@ -450,5 +450,11 @@ await scenario('R11b idle hold is per chat: chat B finishing a turn does not hid
   } finally { Date.now = real }
 })
 
+await scenario('R12 the tool refusal says it is a handoff, not a token or usage limit', async () => {
+  const h = await make(); await h.prompt('x'); await h.measure(310_000)
+  const d = (await h.tool()).deny
+  want(/not a token or usage limit/.test(d) && /fresh chat/.test(d) && !/out of tokens/i.test(d), 'wording: ' + d)
+})
+
 console.log(failed ? `${failed} FAILED` : 'all passed')
 process.exit(failed ? 1 : 0)

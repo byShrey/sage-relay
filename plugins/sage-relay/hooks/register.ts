@@ -202,7 +202,7 @@ async function holdMessage($: any, e: any): Promise<{ drop: string } | undefined
 async function toolGate($: any, e: any): Promise<{ deny?: { deny: string }; plan?: St }> {
   if (e.agentId !== undefined) return {}
   const S = await st($)
-  if (S.busy || S.scheduled || (S.due && willRun(S))) { S.gated = true; return { deny: { deny: 'Handoff pending: make no more tool calls. Write one line saying where you are.' } } }
+  if (S.busy || S.scheduled || (S.due && willRun(S))) { S.gated = true; return { deny: { deny: 'Sage Relay is saving a handoff note and starting a fresh chat. This is not a token or usage limit and nothing is wrong. Make no more tool calls: write one line saying where you are, then stop.' } } }
   return e.tool === 'ExitPlanMode' && !(await routingOn($, S)) ? { plan: S } : {}
 }
 
