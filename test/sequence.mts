@@ -33,7 +33,7 @@ async function make(o: any = {}) {
     store: { get: async (k: string) => kv[k], set: async (k: string, v: unknown) => { kv[k] = v } },
     agent: { register: async (s: any) => { specs.push(s); return { agent: 'sage-relay:' + s.name } } },
     command: {
-      register: async () => {},
+      register: async (c: any) => { log.push('REGISTER ' + c.name) },
       run: async (c: any) => {
         log.push('COMMAND ' + c.command)
         if (o.clearThrows) throw new Error('clear refused')
@@ -454,6 +454,15 @@ await scenario('R12 the tool refusal says it is a handoff, not a token or usage 
   const h = await make(); await h.prompt('x'); await h.measure(310_000)
   const d = (await h.tool()).deny
   want(/not a token or usage limit/.test(d) && /fresh chat/.test(d) && !/out of tokens/i.test(d), 'wording: ' + d)
+})
+
+await scenario('R15 a chat open before an engine restart (no session.start) still gets /switch after its first message', async () => {
+  const h = await make()
+  want(h.count(/^REGISTER switch/) === 0, 'registered before any hook ran')
+  await h.prompt('hello'); await new Promise(r => setTimeout(r, 20))
+  want(h.count(/^REGISTER switch/) === 1, 'registered ' + h.count(/^REGISTER switch/) + ' times after the first message')
+  await h.prompt('again'); await h.start(); await new Promise(r => setTimeout(r, 20))
+  want(h.count(/^REGISTER switch/) === 1, 'registered more than once: ' + h.count(/^REGISTER switch/))
 })
 
 console.log(failed ? `${failed} FAILED` : 'all passed')

@@ -170,7 +170,16 @@ export async function handoff($: any, S: St) {
   }
 }
 
+// /switch is registered once per process. A chat that was open before an engine restart gets no session.start, so the first message registers it too.
+let cmdRegistered = false
+const regCommand = async ($: any) => {
+  if (cmdRegistered) return
+  cmdRegistered = true
+  await $.command.register({ name: 'switch', description: 'Sage Relay: handoff and routing', argumentHint: 'status | note | handoff [on|off] | resend | ceiling N | routing on|off | log' }).catch(() => { cmdRegistered = false })
+}
+
 const regHelpers = async ($: any, S: St) => {
+  await regCommand($)
   if (S.reg) return
   S.reg = true
   S.reg = await Promise.all(HELPERS.map(h => $.agent.register(h))).then(() => true, () => false)
@@ -214,7 +223,6 @@ async function spawnModel($: any, e: any): Promise<string | undefined> {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'switch', description: 'Sage Relay: handoff and routing', argumentHint: 'status | note | handoff [on|off] | resend | ceiling N | routing on|off | log' })
     await regHelpers($, await st($))
 
     return next(e)
