@@ -10,6 +10,9 @@
 - The 5-hour limit warns once per limit window instead of repeating or clearing.
 - Per-chat state, so two open chats don't trigger each other.
 - Missing Python disables handoff with one notice; it never wipes a chat.
+- Idle hold: a message sent after 55+ minutes of idle in a chat of 50k+ tokens is held with the cost; send it again within 2 minutes to go through. Each chat's last turn is kept in the store, so an engine update does not reset it.
+- The tool refusal during a handoff now says it is a handoff, not a token or usage limit.
+- `/switch` also registers on the first message, for chats that were open before an engine restart.
 
 **Note builder**
 - Bad records can't break a note; secret filter rewritten (key blocks, any `*_PASSWORD`/`*_TOKEN` name, more token formats, database URLs, card numbers) with a linear-time check.
@@ -18,7 +21,7 @@
 
 **Routing**
 - Model routing is now off by default: `/switch routing on|off`. Your own model pick is never overridden.
-- Three helper agents the chat chooses by judgement: Deep (Opus, high), Careful (Sonnet, high), Scout (Haiku).
+- Three helper agents the chat chooses by judgement: Deep (Opus, high), Careful (Sonnet, high), Scout (Sonnet, read-only). No Haiku anywhere, and the main chat never changes model for usage reasons.
 
 **New commands**: `/switch status`, `/switch note` (preview without clearing), `/switch handoff off|on`.
 **Other**: ceiling floor of 20k, latest write wins between the command and the file; CI runs the tests on every push.

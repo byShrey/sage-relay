@@ -67,10 +67,10 @@ The replay cannot measure how much detail each handoff loses, so lower is not au
 
 ## What was tested, and what was not
 
-- 18 unit tests for the hooks, 21 handoff-sequence scenarios on a fake engine (one per fixed bug), 22 tests for the note builder, including a secret-filter corpus and a speed test on hostile input.
+- 18 unit tests for the hooks, 34 handoff-sequence scenarios on a fake engine (one per fixed bug), 34 tests for the note builder, including a secret-filter corpus and a speed test on hostile input.
 - Two independent audits (a Claude Opus helper and a blind Gemini review) found the bugs fixed in 0.7.0. Each confirmed bug fails on 0.6.1 and passes on 0.7.0.
 - Note quality, blind-scored on 30 questions about one real chat: this note 29/30, a summary-based note 26/30, built-in compaction 20/30. One chat, one run; differences of a few points are within noise.
-- Handoff sequence tested live: forced and unforced, note arrived in the new chat.
+- Handoff sequence tested live on 0.6.1 (forced and unforced, note arrived in the new chat). The 0.7.0 layout has not yet had its first real handoff.
 - **Not tested:** the idle hold on the real desktop app (proven on the fake engine incl. restart and two chats; not seen live, and the app must label typed prompts as `composer`), auto-on at plan approval (works on the fake engine, not yet seen live), whether helper registration survives a `/clear` you type yourself, how often the chat picks the right helper, Windows (no file locking there).
 - Very long chats: the middle of the conversation is trimmed to fit a size cap, so the note is not word for word for those.
 
