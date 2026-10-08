@@ -10,4 +10,4 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
       - run: python3 -m unittest discover -s tests
-      - run: node test/sequence.mts
+      - run: node tests/sequence.mts

@@ -1,6 +1,6 @@
 // Runs the real hooks/register.ts on a fake engine, so handoff() (git, note, clear, submit) runs end to end.
-// Usage: node test/sequence.mts            (Node 24, no dependencies)
-//        REG=/path/to/register.ts node test/sequence.mts   (run the same scenarios against another copy)
+// Usage: node tests/sequence.mts            (Node 24, no dependencies)
+//        REG=/path/to/register.ts node tests/sequence.mts   (run the same scenarios against another copy)
 import { copyFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
