@@ -1,0 +1,25 @@
+name: Bug
+description: Something went wrong with a handoff, a note or a command
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of /switch status
+      description: Paste it here. Check it holds nothing private first.
+      render: text
+  - type: input
+    id: os
+    attributes:
+      label: OS and Claude Code version
+      placeholder: macOS 26, Claude Code 2.1.x
+  - type: markdown
+    attributes:
+      value: "Please don't paste a note or a transcript: they hold your conversation. For a security problem, use the Security tab instead."

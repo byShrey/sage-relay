@@ -51,7 +51,7 @@ test('routing on: one log line per reply, with the model that ran', async ($, on
 
 test('/switch opus high fixes the main model for this chat', async ($, on) => {
   const send = setup(on, false)
-  await $.command.run({ command: 'switch', args: 'opus high' })
+  await $.command.run({ command: 'switch', args: 'opus high' } as any)
   const s = await send($, 'go')
   expect(s.model).toBe('claude-opus-5-5')
   expect(s.effort).toBe('high')
@@ -156,7 +156,7 @@ test('tool gate denies once a handoff is due, and lifts when it will not run', a
   await measure($, 310_000)
   const r = await $.tool.call({ tool: 'Read', file_path: '/tmp/x' })
   expect(String(r.deny ?? r.text)).toContain('not a token or usage limit')
-  await $.command.run({ command: 'switch', args: 'handoff off' })
+  await $.command.run({ command: 'switch', args: 'handoff off' } as any)
   const r2 = await $.tool.call({ tool: 'Read', file_path: '/tmp/x' })
   expect(String(r2.deny ?? r2.text)).not.toContain('not a token or usage limit')
 })
@@ -178,7 +178,7 @@ test('over the ceiling, /switch handoff plus the turn end run one handoff, not t
   trigger(on)
   const log = handoffStubs(on)
   await measure($, 310_000)
-  await $.command.run({ command: 'switch', args: 'handoff' })
+  await $.command.run({ command: 'switch', args: 'handoff' } as any)
   await complete($)
   await settle()
   expect(log.join(' ')).toBe('CLEAR SUBMIT')
@@ -205,7 +205,7 @@ test('a fresh chat that starts over the ceiling does not loop', async ($, on) =>
 
 test('/switch ceiling refuses values under 20000', async ($, on) => {
   trigger(on)
-  const r = await $.command.run({ command: 'switch', args: 'ceiling 5000' })
+  const r = await $.command.run({ command: 'switch', args: 'ceiling 5000' } as any)
   expect(String(r.text)).toContain('at least 20000')
 })
 

@@ -1,11 +1,36 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.svg">
+  <img src="assets/hero-light.svg" alt="A ruler measuring a chat fills to 300k tokens; a note pops out and drops onto a fresh ruler that starts small and carries on.">
+</picture>
+
 # Sage Relay
 
-A plugin for Claude Code (desktop Code tab) that does two jobs:
+[![test](https://github.com/byShrey/sage-relay/actions/workflows/test.yml/badge.svg)](https://github.com/byShrey/sage-relay/actions/workflows/test.yml) ![version](https://img.shields.io/badge/version-0.7.1-1D6A49) ![licence](https://img.shields.io/badge/licence-MIT-1D6A49)
 
-1. **Long-chat handoff.** When a chat gets long, it saves a note of the whole conversation, clears the chat, and starts a fresh one that carries on from the note. Every message in a long chat re-pays for the whole chat, so a fresh start is cheaper.
-2. **Helper agents and optional model routing.** Three helper types ship with the plugin, and the chat picks one by judgement: **Deep** (Opus, high effort) for hard thinking such as planning, design, research and audits; **Careful** (Sonnet, high effort) for well-defined multi-step work; **Scout** (Sonnet, read-only tools) for finding and reading. Easy questions stay in your own chat. Helpers start without your rules files and without the chat's history, so the chat must give them a full brief. They add about 300 tokens to every chat (their descriptions). Routing is off by default; `/switch routing on` makes helpers that name no model get one by type. **Every chat starts on Sonnet 5.5 medium** (a one-line notice appears if it moves a chat off another model), so hard thinking goes to a Deep (Opus) helper instead of the main chat. A pick you make in the model menu afterwards, `/switch opus high`, or `/switch off` wins; usage never changes the model.
+A plugin for Claude Code that hands a long chat to a fresh one before it gets slow and expensive, and keeps the thread.
 
-The plugin makes no network calls and no model calls of its own. The note builder is plain Python from the standard library. Note that the new chat does send the note to the API, like any message.
+Other handoff tools wait for you to type `/handoff`. This one watches the meter and does it on its own, mid-task if it has to.
+
+## Why bother
+
+Every message you send carries the whole chat with it. In a 300k-token chat, typing "thanks" costs 300k tokens. Long chats also get slower and start forgetting the middle.
+
+Sage Relay writes down what happened, clears the chat, and hands the note to a new chat that picks up where the old one stopped.
+
+## How it works
+
+1. Sage Relay watches the chat's size and gives you one heads-up at 250k.
+2. At 300k it stops new tool calls. A small local Python script writes the whole conversation into a note: every message, minus tool output, with secrets blanked out. No AI call, no network.
+3. The chat clears and the note arrives as the first message. The new chat shows where the work stopped, word for word, then waits for you or carries on.
+
+## See it work
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/demo-dark.svg">
+  <img src="assets/demo-light.svg" alt="Replay: a chat reaches 300k tokens, Sage Relay warns, hands off, and a fresh chat opens with the note and the last step, word for word.">
+</picture>
+
+The messages in the replay are the plugin's real ones. The fresh chat's 82k is from a real handoff; yours depends on how long the chat was.
 
 ## Install
 
@@ -14,21 +39,20 @@ claude plugin marketplace add byShrey/sage-relay
 claude plugin install sage-relay@sage-relay
 ```
 
-Restart the app afterwards. Needs `python3` on your PATH or at `/usr/bin/python3` (macOS or Linux). On macOS without the developer tools, install them first. If Python can't run, handoff turns itself off with one notice and never clears a chat.
+Restart the app. You need `python3` (3.9 or newer) on macOS or Linux. On a Mac without the developer tools, install those first. If Python can't run, handoff switches itself off with one notice. It never clears a chat it couldn't save.
 
-## What it does
+## What it does, and when
 
-| Event | Behaviour |
+| When | What happens |
 |---|---|
-| Chat reaches 83% of the ceiling | One notice per chat, saying where the handoff will fire. |
-| Chat reaches the ceiling (default 300k tokens, or 80% of the window) | Blocks new tool calls, builds the note, clears the chat, and sends the note as the first message of the new chat. A message you type while the note builds is held and sent once with the note. |
-| 95% of your 5-hour limit | One notice per limit window. It does not clear anything. `/switch handoff` starts a fresh chat if you want one. |
-| New chat after a handoff | Waits for 40k tokens of growth past its own start size before it can hand off again. At most 2 handoffs in a row. |
-| Message after about 55 minutes idle in a chat of 50k+ | The message is held with the cost (the saved copy has likely expired and the next message re-pays for the whole chat). Send it again within 2 minutes to go through, or `/switch handoff` to start fresh. Each chat's last turn is kept in the store, so an engine update does not reset it. |
+| The chat reaches 250k (83% of the handoff point) | One notice, saying where the handoff will happen. |
+| The chat reaches 300k, or 80% of the model's window if that is smaller | Builds the note, clears the chat, sends the note to the new chat. Anything you type meanwhile is held and goes along with the note. |
+| You come back after 55+ minutes to a chat of 80k or more | The saved copy of the chat has probably expired, so your next message would re-pay all of it. Sage Relay hands off instead, and your message rides along with the note. |
+| Same, but the chat is 50k to 80k | Your message is held once, with the cost. Send it again within 2 minutes to go ahead anyway. |
+| You hit 95% of your 5-hour usage limit | One notice. Nothing is cleared. |
+| A fresh chat after a handoff | It waits for 40k tokens of growth before it can hand off again, and stops at 2 in a row until you type. |
 
-If building the note fails, the chat is **not** cleared: you see "note failed, chat kept", and automatic handoff stays off for that chat until `/switch handoff on` or a successful manual handoff. If the new chat can't be started after a clear, the note stays pending and `/switch resend` sends it.
-
-An automatic handoff says `STATUS: CONTINUE` (the new chat carries on) only if work was stopped mid-turn. A manual handoff says `STATUS: WAIT` (the new chat reports and waits for you).
+If the note fails, the chat is **kept** and you see "note failed, chat kept". If the note can't reach the new chat, it goes along with your next message instead, or `/switch resend` sends it.
 
 ## Commands
 
@@ -38,50 +62,88 @@ An automatic handoff says `STATUS: CONTINUE` (the new chat carries on) only if w
 /switch handoff         hand off now
 /switch handoff off|on  stop or start automatic handoff for this chat
 /switch resend          send the last note again
-/switch ceiling 200000  change the ceiling (minimum 20000)
-/switch routing on|off  helper routing by type (off by default)
-/switch opus high | sonnet medium    fix a model for this chat (/switch off: no fixed model, no Sonnet default)
+/switch ceiling 200000  move the handoff point (minimum 20000)
+/switch routing on|off  pick a model for helpers by type (off by default)
+/switch opus high       fix a model for this chat (also: sonnet low|medium|high)
+/switch off             routing off, no fixed model
 /switch log             last 10 routing log lines
 ```
 
-`/switch auto` and `/switch off` still work as older names for routing on and off.
+## Settings
 
-## Settings (plain files)
+Plain files, one value each, in `~/.claude/sage-relay/`:
 
-- `~/.claude/sage-relay/ceiling`: one number, the ceiling in tokens (minimum 20000). The newest write wins between this file and `/switch ceiling`; deleting the file restores 300k.
-- `~/.claude/sage-relay/pin-models`: put `on` to switch routing on at start. Off by default.
-- Notes are saved in `~/.claude/sage-relay/notes`, folder private to you (700), files 600, and deleted after 14 days.
+- `ceiling`: the handoff point in tokens (minimum 20000). The newest of this file and `/switch ceiling` wins. Delete it to go back to 300k.
+- `sonnet-default`: put `on` to start every chat on Sonnet 5.5 medium and send hard thinking to an Opus helper. Off unless you add it.
+- `pin-models`: put `on` to start with helper routing on.
 
-## Choosing a ceiling
+Notes live in `~/.claude/sage-relay/notes`, readable only by you, and are deleted after 14 days.
 
-A replay of 9 days of one person's real chats (5,849 replies, one user, so treat it as a hint):
+## The second job: helpers
 
-| Ceiling | Handoffs per day | Cost vs 300k |
+Three helper types come with the plugin. The chat picks one when the work calls for it:
+
+- **Deep** (Opus, high effort): planning, design, research, audits.
+- **Careful** (Sonnet, high effort): clear multi-step work like tests or a one-file refactor.
+- **Scout** (Sonnet, read-only): finding and reading.
+
+Easy questions stay in your chat. Helpers start without your chat's history, so the chat has to give them a full brief. Their descriptions add about 400 tokens to every chat.
+
+## FAQ
+
+**Why not just use `/compact`?**
+Compaction writes a short summary. Sage Relay keeps what was said. In a blind 30-question test on one real chat, the Sage Relay note scored 28.5/30 and built-in compaction scored 15.5/30. That was one chat and one run, so read it as a hint.
+
+**Does it send my chat anywhere?**
+The plugin makes no network calls and no AI calls. The note is written to your own disk. The new chat then sends it to the API like any message you type.
+
+**Will it cut me off mid-task?**
+At the line it refuses new tool calls, lets the reply in progress end, then hands off. If it had to stop work mid-task, the new chat carries straight on. Otherwise the new chat shows where things stopped and waits for you.
+
+**Windows?**
+Not tested. The file lock works differently there.
+
+## Choosing a handoff point
+
+A replay of 9 days of one person's real chats (5,849 replies from one user):
+
+| Handoff point | Handoffs per day | Cost vs 300k |
 |---|---|---|
 | 200k | 8.6 | about 20% lower |
-| 300k | 3.9 | baseline |
+| 300k | 3.9 | the default |
 | 400k | 2.4 | about 13% higher |
 | 500k | 1.6 | about 26% higher |
 
-The replay cannot measure how much detail each handoff loses, so lower is not automatically better. 300k is the default.
+The replay can't measure what each handoff loses, so lower isn't automatically better.
 
-## What was tested, and what was not
+## What was tested, and what wasn't
 
-- 18 unit tests for the hooks, 34 handoff-sequence scenarios on a fake engine (one per fixed bug), 34 tests for the note builder, including a secret-filter corpus and a speed test on hostile input.
-- Two independent audits (a Claude Opus helper and a blind Gemini review) found the bugs fixed in 0.7.0. Each confirmed bug fails on 0.6.1 and passes on 0.7.0.
-- Note quality, blind-scored on 30 questions about one real chat: this note 29/30, a summary-based note 26/30, built-in compaction 20/30. One chat, one run; differences of a few points are within noise.
-- Handoff sequence tested live on 0.6.1 (forced and unforced, note arrived in the new chat). The 0.7.0 layout has not yet had its first real handoff.
-- **Not tested:** the idle hold on the real desktop app (proven on the fake engine incl. restart and two chats; not seen live, and the app must label typed prompts as `composer`), auto-on at plan approval (works on the fake engine, not yet seen live), whether helper registration survives a `/clear` you type yourself, how often the chat picks the right helper, Windows (no file locking there).
-- Very long chats: the middle of the conversation is trimmed to fit a size cap, so the note is not word for word for those.
+- 18 hook tests, 44 handoff scenarios on a fake engine (one for each bug ever fixed), and 36 tests for the note builder, including a secret-filter list of 38 key formats and a speed test on hostile input. All of it runs on every push.
+- Two outside audits per release by a different AI family, every finding checked against the code.
+- A real handoff on 0.7.0: the fresh chat opened at 82k tokens, against 190k with 0.6.1.
+- **Not tested live yet:** the idle auto-handoff on the real app (proven on the fake engine only), routing switching on at plan approval, how often the chat picks the right helper, Windows.
+- Very long chats have their middle trimmed to fit a size cap, so for those the note is not word for word.
 
-## Privacy
+## Privacy and security
 
-The note contains your conversation minus tool output, with secrets redacted by pattern (key blocks, common token formats, `*_PASSWORD`-style names, database URLs with passwords, card numbers). It is written to your own disk and sent to the new chat, which means it goes to the API like any message. Redaction is best effort: read a note (`/switch note`) before sharing it. Carried history is labelled as untrusted in the note, and rule-like lines are listed as candidates for you to confirm.
+The note holds your conversation minus tool output. Secrets are blanked out by pattern: key blocks, common token formats, `*_PASSWORD` and `*_KEY` style names, database URLs with passwords, card numbers. It's best effort, so read a note (`/switch note`) before you share one. History carried into a new chat is labelled untrusted, and lines that look like rules are listed for you to confirm, not obeyed.
 
-## Credits
-
-The hooks are original. The note builder grew out of the author's own earlier tool. Ideas from claude-auto-handoff, Sting25, context-relay, usage-guard and effortless (all MIT; no code copied).
+Found a hole? See [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-MIT, see LICENSE.
+MIT, see [LICENSE](LICENSE).
+
+<details>
+<summary>Do not open</summary>
+
+```
+      o            o
+    _/|\_[=] ->  _/|\_
+      / \          / \
+ ----------------------------
+  you made it to the finish line.
+  type /switch baton in any chat.
+```
+
+</details>

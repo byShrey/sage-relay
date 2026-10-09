@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" role="img" aria-labelledby="t d">
+<title id="t">Sage Relay handoff, replayed</title>
+<desc id="d">A chat grows to 300k tokens. Sage Relay warns at 250k, then says handing off. The chat clears, and a fresh chat opens at 82k tokens with the handoff note, showing where the work stopped, word for word.</desc>
+<defs><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#9BE0BC" stroke-opacity=".09"/></pattern></defs>
+<style>
+  text{font:500 15px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#DCE7E0}
+  .m{fill:#92A698}.g{fill:#5FC896}.w{fill:#131E18}.s{font-size:13px}
+  .brand{font-weight:600;font-size:14px;fill:#9BE0BC;letter-spacing:.18em}
+  .x{animation:9s ease-out infinite both;opacity:0}
+  .o1{animation-name:o1}.o2{animation-name:o2}.o3{animation-name:o3}.o4{animation-name:o4}.toast{animation-name:toast}.ho{animation-name:ho}
+  @keyframes o1{0%{opacity:0;transform:translateY(6px)}3%,44%{opacity:1;transform:none}45%,100%{opacity:0}}
+  @keyframes o2{0%,8%{opacity:0;transform:translateY(6px)}11%,44%{opacity:1;transform:none}45%,100%{opacity:0}}
+  @keyframes o3{0%,16%{opacity:0;transform:translateY(6px)}19%,44%{opacity:1;transform:none}45%,100%{opacity:0}}
+  @keyframes o4{0%,24%{opacity:0;transform:translateY(6px)}27%,44%{opacity:1;transform:none}45%,100%{opacity:0}}
+  @keyframes toast{0%,28%{opacity:0;transform:translateY(10px)}31%,40%{opacity:1;transform:none}43%,100%{opacity:0}}
+  @keyframes ho{0%,38%{opacity:0}40%,46%{opacity:1}47%,100%{opacity:0}}
+  .wipe{animation:wipe 9s ease-in-out infinite both;transform-origin:60px 0;transform:scaleX(0)}
+  @keyframes wipe{0%,45%{transform:scaleX(0);transform-origin:60px 0}49%{transform:scaleX(1);transform-origin:60px 0}50%{transform:scaleX(1);transform-origin:1140px 0}54%,100%{transform:scaleX(0);transform-origin:1140px 0}}
+  .n1{animation-name:n1}.n2{animation-name:n2}.n3{animation-name:n3}.n4{animation-name:n4}.n5{animation-name:n5}
+  @keyframes n1{0%,52%{opacity:0;transform:translateY(6px)}55%,96%{opacity:1;transform:none}100%{opacity:0}}
+  @keyframes n2{0%,58%{opacity:0;transform:translateY(6px)}61%,96%{opacity:1;transform:none}100%{opacity:0}}
+  @keyframes n3{0%,64%{opacity:0;transform:translateY(6px)}67%,96%{opacity:1;transform:none}100%{opacity:0}}
+  @keyframes n4{0%,70%{opacity:0;transform:translateY(6px)}73%,96%{opacity:1;transform:none}100%{opacity:0}}
+  @keyframes n5{0%,78%{opacity:0}81%,96%{opacity:1}100%{opacity:0}}
+  .k1{animation-name:k1}.k2{animation-name:k2}.k3{animation-name:k3}.k4{animation-name:k4}
+  @keyframes k1{0%,10%{opacity:1}11%,100%{opacity:0}}
+  @keyframes k2{0%,10%{opacity:0}11%,29%{opacity:1}30%,100%{opacity:0}}
+  @keyframes k3{0%,29%{opacity:0}30%,48%{opacity:1}49%,100%{opacity:0}}
+  @keyframes k4{0%,51%{opacity:0}52%,96%{opacity:1}100%{opacity:0}}
+  @media (prefers-reduced-motion:reduce){.x,.wipe{animation:none!important}.x{opacity:0}.n1,.n2,.n3,.n4,.n5,.k4{opacity:1}}
+</style>
+<rect width="1200" height="440" rx="14" fill="#0D1511"/>
+<rect width="1200" height="440" rx="14" fill="url(#grid)"/>
+<text class="brand" x="60" y="26" dy="2">SAGE RELAY</text>
+<rect x="60" y="40" width="1080" height="370" rx="10" fill="#131E18" stroke="#263629"/>
+<path d="M60 76H1140" stroke="#263629"/>
+<text class="m s" x="80" y="63">claude code</text>
+<g text-anchor="end" class="s"><text class="m x k1" x="1120" y="63">231k tokens</text><text class="m x k2" x="1120" y="63">251k tokens</text><text class="m x k3" x="1120" y="63">300k tokens</text><text class="g x k4" x="1120" y="63">82k tokens · fresh chat</text></g>
+
+<!-- the long chat -->
+<g>
+  <text class="x o1" x="84" y="116"><tspan class="m">you   </tspan>fix the flaky timing test, then rerun the suite</text>
+  <text class="x o2" x="84" y="150"><tspan class="m">claude</tspan> Reading tests/test_note.py and the lock code…</text>
+  <text class="x o3" x="84" y="184"><tspan class="m">claude</tspan> Found it: the note expires before the run ends.</text>
+  <text class="x o4" x="84" y="218"><tspan class="m">claude</tspan> Writing the new test first, so it fails before the fix.</text>
+  <g class="x toast">
+    <rect x="560" y="300" width="560" height="56" rx="8" fill="#DCE7E0"/>
+    <text class="w s" x="580" y="324">Chat is at 250k tokens; it hands off at 300k.</text>
+    <text class="w s" x="580" y="344" fill-opacity=".7">/switch handoff does it now.</text>
+  </g>
+  <text class="g x ho" x="84" y="386">handing off…</text>
+</g>
+
+<!-- the fresh chat -->
+<g>
+  <g class="x n1"><rect x="78" y="96" width="384" height="28" rx="3" fill="#E6C25A"/><text x="88" y="116" style="fill:#2B2204">Continue from the handoff note below.</text></g>
+  <text class="x n2" x="84" y="160">STATUS: WAIT</text>
+  <text class="m x n3" x="84" y="200">Where it stopped (word for word):</text>
+  <text class="x n4" x="84" y="232">Writing the new test first, so it fails before the fix.</text>
+  <text class="g x n5" x="84" y="386">handed off (1/2) · 218k tokens lighter</text>
+</g>
+<rect class="wipe" x="60" y="77" width="1080" height="332" fill="#5FC896"/>
+</svg>

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" role="img" aria-labelledby="t d">
+<title id="t">Sage Relay</title>
+<desc id="d">A ruler measuring a chat fills with highlighter yellow up to 300k tokens. A note card pops out at the end and drops onto a second, fresh ruler, which starts small and carries on.</desc>
+<defs>
+  <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#1D5A3E" stroke-opacity=".09"/></pattern>
+  <pattern id="minor" x="80" width="34.6667" height="64" patternUnits="userSpaceOnUse"><path d="M.5 0V12" stroke="#1D5A3E" stroke-opacity=".55"/></pattern>
+  <pattern id="major" x="80" width="173.3333" height="64" patternUnits="userSpaceOnUse"><path d="M.5 0V26" stroke="#1D5A3E" stroke-width="1.5"/></pattern>
+</defs>
+<style>
+  .mono{font:500 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#56675D;letter-spacing:.04em}
+  .num{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#1D5A3E}
+  .brand{font:600 14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#1D5A3E;letter-spacing:.18em}
+  .tag{font:600 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#F6F9F6}
+  .f1,.tip,.note,.f2,.c,.lab2{animation:6s ease-in-out infinite both}
+  .f1{animation-name:f1;transform-origin:80px 0}
+  @keyframes f1{0%{transform:scaleX(.01);opacity:1}45%{transform:scaleX(1);opacity:1}72%{transform:scaleX(1);opacity:1}80%,100%{transform:scaleX(1);opacity:0}}
+  .tip{animation-name:tip}
+  @keyframes tip{0%{transform:translateX(-1030px);opacity:1}45%{transform:translateX(0);opacity:1}50%,100%{transform:translateX(0);opacity:0}}
+  .note{animation-name:note}
+  @keyframes note{0%,44%{transform:translate(0,30px) scale(.2);opacity:0}50%{transform:translate(0,0) scale(1);opacity:1}58%{transform:translate(0,0)}64%{transform:translate(-520px,-30px)}70%{transform:translate(-1028px,142px);opacity:1}76%{transform:translate(-1028px,142px);opacity:1}82%,100%{transform:translate(-1028px,142px);opacity:0}}
+  .f2{animation-name:f2;transform-origin:80px 0}
+  @keyframes f2{0%,70%{transform:scaleX(0)}76%,96%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+  .lab2{animation-name:lab2}
+  @keyframes lab2{0%,72%{opacity:0}78%,96%{opacity:1}100%{opacity:0}}
+  .c{opacity:0}
+  .c1{animation-name:c1}.c2{animation-name:c2}.c3{animation-name:c3}
+  @keyframes c1{0%,44%{opacity:0}45%,72%{opacity:1}73%,100%{opacity:0}}
+  @keyframes c2{0%,72%{opacity:0}74%,96%{opacity:1}100%{opacity:0}}
+  @keyframes c3{0%,44%{opacity:1}45%,100%{opacity:0}}
+  .note{transform-box:fill-box;transform-origin:center}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important}.c1{opacity:1}.tip,.note{opacity:0}}
+</style>
+<rect width="1200" height="400" rx="14" fill="#E4EBE5"/>
+<rect width="1200" height="400" rx="14" fill="url(#grid)"/>
+<text class="brand" x="80" y="56">SAGE RELAY</text>
+<text class="mono" x="1120" y="56" text-anchor="end">long chat in, fresh chat out</text>
+
+<!-- ruler 1 -->
+<text class="mono" x="80" y="100">chat 1</text>
+<g text-anchor="end"><text class="mono c c3" x="1120" y="100">filling up</text><text class="mono c c1" x="1120" y="100">300k: handing off</text><text class="mono c c2" x="1120" y="100">cleared</text></g>
+<rect x="80" y="110" width="1040" height="64" rx="4" fill="#F6F9F6" stroke="#C7D3CA"/>
+<rect class="f1" x="80" y="110" width="1040" height="64" rx="4" fill="#F1C84B" fill-opacity=".85"/>
+<rect x="80" y="110" width="1040" height="64" fill="url(#minor)"/>
+<rect x="80" y="110" width="1040" height="64" fill="url(#major)"/>
+<g class="num" text-anchor="middle"><text x="84" y="194">0</text><text x="253" y="194">50k</text><text x="427" y="194">100k</text><text x="600" y="194">150k</text><text x="773" y="194">200k</text><text x="947" y="194">250k</text><text x="1116" y="194">300k</text></g>
+<g class="tip"><path d="M1120 104V180" stroke="#13201A" stroke-width="2"/></g>
+
+<!-- ruler 2 -->
+<text class="mono" x="80" y="240">chat 2</text>
+<text class="mono lab2" x="1120" y="240" text-anchor="end">starts at 82k, carries on from the note</text>
+<rect x="80" y="250" width="1040" height="64" rx="4" fill="#F6F9F6" stroke="#C7D3CA"/>
+<rect class="f2" x="80" y="250" width="284" height="64" rx="4" fill="#1D6A49" fill-opacity=".85"/>
+<rect x="80" y="250" width="1040" height="64" fill="url(#minor)"/>
+<rect x="80" y="250" width="1040" height="64" fill="url(#major)"/>
+<g class="num" text-anchor="middle"><text x="84" y="334">0</text><text x="253" y="334">50k</text><text x="427" y="334">100k</text><text x="600" y="334">150k</text><text x="773" y="334">200k</text><text x="947" y="334">250k</text><text x="1116" y="334">300k</text></g>
+
+<!-- the note -->
+<g class="note">
+  <rect x="1078" y="82" width="84" height="38" rx="4" fill="#13201A"/>
+  <text class="tag" x="1120" y="106" text-anchor="middle">note</text>
+</g>
+<text class="mono" x="600" y="378" text-anchor="middle">every message re-pays the whole chat, so the long one hands over</text>
+</svg>

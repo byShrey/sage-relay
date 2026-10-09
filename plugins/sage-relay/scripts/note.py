@@ -7,6 +7,10 @@ minus tool output, with secrets redacted, plus the last message, pinned rules
 and git state. No network, no model calls, standard library only.
 
 Derived from the author's earlier "session-relay" tool (same author, MIT).
+
+      o
+    _/|\_[=]    this file is the baton
+      / \
 """
 import contextlib
 import json
@@ -46,12 +50,17 @@ _SECRET_RE = re.compile(
     r"|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{20,}"
     r"|hf_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{16,}|glpat-[A-Za-z0-9_-]{16,}|npm_[A-Za-z0-9]{20,}"
     r"|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|ya29\.[A-Za-z0-9_-]{20,}"
-    r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
+    r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+    r"|\d{8,10}:AA[A-Za-z0-9_-]{30,}|[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}"
+    r"|GOCSPX-[A-Za-z0-9_-]{20,}|(?:gsk|r8|sbp|shp(?:at|ss|ca|pa)|lin_api)_[A-Za-z0-9]{20,}|dop_v1_[a-f0-9]{20,}"
+    r"|pplx-[A-Za-z0-9]{20,}|secret_[A-Za-z0-9]{30,})"
     r"|hooks\.slack\.com/services/[A-Za-z0-9/]+"
     # a key block: the header, the base64 lines under it, and the footer if there is one
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\s+[A-Za-z0-9+/=]{20,})*(?:\s*-----END [A-Z ]*PRIVATE KEY-----)?"
     r"|(?i:(?<![A-Za-z0-9_])(?:bearer|basic)\s+)[A-Za-z0-9._~+/=-]{16,}"
-    r"|(?i:(?<![A-Za-z0-9_-])[A-Za-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret)[A-Za-z0-9_-]*[\"']?\s*[:=]\s*)[\"']?[^\s\"',;]{6,}"
+    r"|(?i:(?<![A-Za-z0-9_-])[A-Za-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|_key)[A-Za-z0-9_-]*[\"']?\s*[:=]\s*)[\"']?[^\s\"',;]{6,}"
+    # "my password is hunter2": only when the value has a digit or symbol, so "the password is incorrect" survives
+    r"|(?i:(?<![A-Za-z0-9_-])(?:password|passwd|passcode|pin)\s+(?:is|was)\s+)(?=\S*[\d!@#$%^&*])[^\s\"',;]{6,}"
     r"|(?i:(?<![A-Za-z0-9_-])(?:api-keys?|key)\s*[:=]\s*)[\"']?[A-Za-z0-9-]{24,}"
 )
 _URLCRED_RE = re.compile(r"(?<=://)[^\s:/@]+:[^\s@/]+(?=@)")  # scheme://user:password@host
@@ -87,6 +96,8 @@ def project_slug(cwd):
 def project_dir(cwd):
     d = STATE_ROOT / project_slug(cwd)
     d.mkdir(parents=True, exist_ok=True)
+    if STATE_ROOT.is_symlink() or d.is_symlink():  # chmod below would follow it to someone else's folder
+        raise OSError(f"refusing a symlinked notes folder: {d}")
     for p in (STATE_ROOT, d):  # notes hold whole conversations: owner only
         try:
             os.chmod(p, 0o700)
@@ -152,7 +163,9 @@ def _locked(d):
         yield
     finally:
         os.close(fd)
-        lock.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            if lock.read_text().strip() == str(os.getpid()):  # a waiter may have taken it over as stale
+                lock.unlink()
 
 
 def _lock_is_stale(lock):
@@ -476,11 +489,11 @@ def changed_files(records, n=10):
 def git_status(cwd):
     try:
         import subprocess
-        branch = subprocess.run(["git", "-C", cwd, "branch", "--show-current"],
+        branch = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", cwd, "branch", "--show-current"],
                                  capture_output=True, text=True, timeout=3).stdout.strip()
         if not branch:
             return None
-        status = subprocess.run(["git", "-C", cwd, "status", "--short"],
+        status = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", cwd, "status", "--short"],
                                  capture_output=True, text=True, timeout=3).stdout.strip()
         return branch, status
     except Exception:
@@ -640,7 +653,7 @@ def cmd_save(data):
     records = read_json_lines(transcript_path) if transcript_path else []
 
     task_lines = recent_user_texts(records, 6)
-    first_task = task_lines[0] if task_lines else "(no user message recorded)"
+    first_task = redact(task_lines[0]) if task_lines else "(no user message recorded)"  # it is stored in tags.json
 
     # Claude Code's own Stop hook field is preferred when present, but it
     # can legitimately be empty (the last turn ended on a tool call with
@@ -719,7 +732,9 @@ def conversation_text(transcript_path):
                 inp = b.get("input")
                 inp = inp if isinstance(inp, dict) else {}
                 lines.append(f"[{b.get('name')} {inp.get('file_path') or inp.get('description') or ''}]".rstrip())
-    text = redact("\n".join(lines))
+    # Cut with a margin, redact, then cut exact: cheap on a huge file, and a key split by the
+    # first cut sits inside the margin that the second cut throws away.
+    text = redact("\n".join(lines)[-(ARCHIVE_MAX_CHARS + 10_000):])
     if len(text) > ARCHIVE_MAX_CHARS:
         text = "[... start of session cut for length ...]\n" + text[-ARCHIVE_MAX_CHARS:]
     return text

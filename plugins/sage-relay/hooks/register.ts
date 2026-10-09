@@ -13,9 +13,12 @@ const MAX_RUN = 2 // handoffs in a row before the person types again
 const LIMIT_HARD = 95 // 5-hour usage: one notice per limit window, never a clear
 const CEILING_FILE = '/.claude/sage-relay/ceiling' // optional file holding one number; lets a live test set the ceiling without typing
 const PIN_FILE = '/.claude/sage-relay/pin-models' // legacy: "on" in it switches routing on at first use
+const SONNET_FILE = '/.claude/sage-relay/sonnet-default' // "on" in it starts every chat on Sonnet 5.5 medium; off by default
 const WARN = 250 / 300 // notice at this share of the handoff point
 const IDLE_MS = 55 * 60_000 // the saved copy expires after about an hour
 const IDLE_MIN_TOKENS = 50_000 // below this a cold restart is cheap, so no hold
+const IDLE_HANDOFF_TOKENS = 80_000 // at or above this an idle chat hands off on its own instead of holding
+const NOTE_WAIT_MS = 5_000 // after our clear, the person's messages wait this long for the note to land first
 const IDLE_RESEND_MS = 2 * 60_000 // sending again within this long after a hold goes through
 const GROWTH = 40_000 // after a handoff, wait for this much growth past the new chat's own start size
 const RETRY_GROWTH = 20_000 // after a failed note, try again once the chat has grown this much
@@ -47,7 +50,7 @@ export const HELPERS = [
   { name: 'scout', model: NAME.sonnet, description: `Use Scout for finding, listing, reading and searching with no judgement needed. ${EASY}` },
 ].map(h => ({ ...h, prompt: HELPER_PROMPT, omitClaudeMd: true as const, maxTurns: h.name === 'scout' ? 20 : 40, ...(h.name === 'scout' && { tools: ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch'] }) })) // ponytail: no rules file in helpers (the brief carries what matters); Scout is read-only
 
-const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0, idleHeldAt: 0, pinTried: false })
+const fresh = () => ({ due: '' as '' | 'context' | 'manual', scheduled: false, busy: false, cleared: false, run: 0, lastTag: '', pending: '', gated: false, queue: [] as string[], base: 0, last: 0, fresh: false, warned: false, tokens: 0, window: 0, doneAt: 0, auto: true, fixed: undefined as Pick | undefined, menu: '', text: '', reg: false, routing: undefined as boolean | undefined, cmd: undefined as { v: number; t: number } | undefined, fails: 0, retryAt: 0, idleHeldAt: 0, pinTried: false, clearAt: 0 })
 type St = ReturnType<typeof fresh>
 // State per chat: one module may serve several open chats. Oldest dropped past SESSIONS.
 export const M = new Map<string, St>()
@@ -71,7 +74,7 @@ let pyAt = 0 // when python was last probed
 // This chat's ceiling: its own /switch ceiling if that is the latest write, else the file, else the default.
 const ceilOf = (S: St): { v: number; src: 'default' | 'file' | 'command' } =>
   S.cmd && S.cmd.t >= file.t ? { v: S.cmd.v, src: 'command' } : file.v !== null ? { v: file.v, src: 'file' } : { v: DEFAULT_CEILING, src: 'default' }
-const point = (S: St) => Math.max(Math.min(ceilOf(S).v, 0.8 * (S.window || Infinity)), S.base ? S.base + GROWTH : 0) // what actually triggers a handoff
+const point = (S: St) => Math.min(Math.max(Math.min(ceilOf(S).v, 0.8 * (S.window || Infinity)), S.base ? S.base + GROWTH : 0), 0.95 * (S.window || Infinity)) // what actually triggers a handoff
 const willRun = (S: St) => S.auto && S.run < MAX_RUN && PY !== null
 const readHome = async ($: any, p: string): Promise<string | null> => {
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
@@ -102,7 +105,7 @@ async function python($: any): Promise<string | null> {
 }
 
 async function gitStatus($: any, cwd: string): Promise<string> {
-  const r = await $.process.run(['git', 'status', '--porcelain'], { cwd, timeoutMs: 2000 }).catch(() => null)
+  const r = await $.process.run(['git', '-c', 'core.fsmonitor=false', 'status', '--porcelain'], { cwd, timeoutMs: 2000 }).catch(() => null)
   if (!r) return '(git unavailable)'
   if (r.exitCode !== 0) return '(not a git repo)'
   const lines: string[] = r.stdout.split('\n').map((l: string) => l.trimEnd()).filter(Boolean) // keep the leading status column
@@ -115,7 +118,7 @@ async function buildNote($: any, S: St): Promise<{ tag: string; text: string } |
   if (!py) return 'no python3'
   try {
     const cwd = await $.session.cwd()
-    const r = await $.process.run([py, $.plugin.root + RELAY_SCRIPT], { cwd, stdin: JSON.stringify({ cwd, session_id: await $.session.id(), parent: S.lastTag || undefined }), timeoutMs: 120_000 })
+    const r = await $.process.run([py, '-I', $.plugin.root + RELAY_SCRIPT], { cwd, stdin: JSON.stringify({ cwd, session_id: await $.session.id(), parent: S.lastTag || undefined }), timeoutMs: 120_000 })
     const o = r.exitCode === 0 ? JSON.parse(r.stdout) : null
     return o?.text && o.tag ? o : (r.stderr.trim() || 'empty note').slice(0, 120)
   } catch (err) { return String(err).slice(0, 120) }
@@ -158,10 +161,10 @@ export async function handoff($: any, S: St) {
     const status = S.due === 'context' && S.gated ? 'CONTINUE' : 'WAIT'
     const old = await $.session.id()
     await $.command.run({ command: 'clear' })
-    S.cleared = true; S.lastTag = note.tag; S.run++; S.fresh = true; S.base = 0; S.warned = false; S.reg = false; S.fails = 0; S.retryAt = 0
+    S.cleared = true; S.clearAt = Date.now(); S.lastTag = note.tag; S.run++; S.fresh = true; S.base = 0; S.warned = false; S.reg = false; S.fails = 0; S.retryAt = 0
     M.delete(old); M.set(await $.session.id().catch(() => old), S) // the new chat carries this state
     const typed = S.queue.length ? `\n\nWhile the handoff ran, the person also typed:\n${S.queue.map(q => `- ${q}`).join('\n')}` : ''
-    S.pending = `STATUS: ${status}\n${status === 'WAIT' ? "First show the person the note's 'Where it stopped' section in full, word for word. Then say where things stand in one line and wait for them." : 'Carry on from the next step in the note.'}\n\nGit status:\n${git}\n\n${note.text}${typed}`
+    S.pending = `STATUS: ${status}\n${status === 'CONTINUE' ? 'Carry on from the next step in the note.' : S.queue.length ? "First show the person the note's 'Where it stopped' section in full, word for word. Then answer what they typed, listed at the end." : "First show the person the note's 'Where it stopped' section in full, word for word. Then say where things stand in one line and wait for them."}\n\nGit status:\n${git}\n\n${note.text}${typed}`
     if (await resend($, S)) $.ui.status(`handed off (${S.run}/${MAX_RUN})`)
   } catch (err) {
     $.ui.status(S.cleared ? 'chat cleared, type /switch resend' : `handoff failed, chat kept: ${String(err).slice(0, 80)}`)
@@ -188,17 +191,29 @@ const regHelpers = async ($: any, S: St) => {
 }
 
 // prompt.submit: while the note builds, hold what the person types (it goes to the new chat); returns the drop, or nothing to pass it on.
-async function holdMessage($: any, e: any): Promise<{ drop: string } | undefined> {
+async function holdMessage($: any, e: any): Promise<{ drop: string } | { context: string } | undefined> {
   if (e.origin.kind !== 'composer' && e.origin.kind !== 'bridge') return
   const S = await st($)
-  if (S.busy && !S.cleared) {
+  if ((S.busy || S.scheduled) && !S.cleared) { // scheduled too: a second message sent before the handoff starts must not land in the old chat
     if (S.queue.length >= HOLD_MSGS || S.queue.reduce((n, q) => n + q.length, 0) + e.text.length > HOLD_CHARS) return { drop: 'Handoff is running and the hold is full. Wait for the new chat, then send this again.' }
     S.queue.push(e.text)
     return { drop: 'Held: it goes to the new chat with the handoff note.' }
   }
+  if (S.pending && Date.now() - S.clearAt < NOTE_WAIT_MS) return { drop: 'Held: the handoff note is arriving. Send this again in a moment.' }
+  if (S.pending) { // the note never arrived: it rides along with this message instead of the person typing into a blank chat
+    const note = `${HEAD}\n\n${S.pending}`; S.pending = ''
+    $.ui.toast('Sage Relay: the handoff note was attached to your message.')
+    return { context: note }
+  }
   // Idle hold: last turn time and size come from the store, so an engine restart does not forget them. A second send within 2 minutes goes through.
   const last = S.doneAt ? { t: S.doneAt, tokens: S.tokens } : (await idleMap($))[await $.session.id().catch(() => '?')]
   if (last && last.tokens >= IDLE_MIN_TOKENS && Date.now() - last.t > IDLE_MS) {
+    S.run = 0
+    if (last.tokens >= IDLE_HANDOFF_TOKENS && willRun(S) && !S.scheduled) { // the note costs no tokens; waking the old chat would
+      S.tokens = last.tokens; S.doneAt = Date.now(); S.queue = [e.text]; S.due = 'manual'; S.scheduled = true
+      $.clock.after(0, () => void handoff($, S))
+      return { drop: `Held: this chat was idle ${Math.round((Date.now() - last.t) / 60_000)} min and waking it would re-pay about ${Math.round(last.tokens / 1000)}k tokens, so Sage Relay is handing off to a fresh chat. Your message goes with the note.` }
+    }
     if (Date.now() - S.idleHeldAt > IDLE_RESEND_MS) {
       S.idleHeldAt = Date.now()
       return { drop: `Held: this chat was idle ${Math.round((Date.now() - last.t) / 60_000)} min, so its saved copy has likely expired and this message re-pays about ${Math.round(last.tokens / 1000)}k tokens. Send it again within 2 minutes to continue anyway, or type /switch handoff to start a fresh chat from a note.` }
@@ -226,6 +241,7 @@ async function spawnModel($: any, e: any): Promise<string | undefined> {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await regHelpers($, await st($))
+    void python($) // known before the first handoff, so a missing python never gates tools
 
     return next(e)
   })
@@ -238,7 +254,10 @@ export const register: Register = on => {
   })
 
   // A gate that crashes is absent: the message, tool call or helper goes through. .catch says so out loud.
-  on('prompt.submit', async ($, e, next) => (await holdMessage($, e)) ?? next(e)).catch(() => undefined)
+  on('prompt.submit', async ($, e, next) => {
+    const h = await holdMessage($, e)
+    return h && 'context' in h ? next({ ...e, context: [...(e.context ?? []), h.context] }) : h ?? next(e)
+  }).catch(() => undefined)
 
   on('session.measure', async ($, e, next) => {
     const fh = e.rateLimits.find(r => r.kind === 'five_hour')?.percentUsed
@@ -288,9 +307,9 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) return yield* next(e)
     const S = await st($)
-    if (!S.pinTried) { // each chat starts on Sonnet 5.5 medium; Opus work goes to a Deep helper. A menu pick or /switch opus later wins.
+    if (!S.pinTried) { // with the sonnet-default file on, each chat starts on Sonnet 5.5 medium; Opus work goes to a Deep helper. A menu pick or /switch opus later wins.
       S.pinTried = true
-      if (e.model !== NAME.sonnet && !S.fixed) { S.fixed = { model: NAME.sonnet, effort: 'medium' }; $.ui.toast('Sage Relay: this chat runs on Sonnet 5.5 medium; hard thinking goes to a Deep (Opus) helper. /switch opus high keeps this chat on Opus; /switch off stops this.') }
+      if (e.model !== NAME.sonnet && !S.fixed && (await readHome($, SONNET_FILE))?.trim() === 'on') { S.fixed = { model: NAME.sonnet, effort: 'medium' }; $.ui.toast('Sage Relay: this chat runs on Sonnet 5.5 medium; hard thinking goes to a Deep (Opus) helper. /switch opus high keeps this chat on Opus; /switch off stops this.') }
     }
     if (S.fixed && (S.menu ||= e.model) !== e.model) { S.fixed = undefined; $.ui.status('fixed model off: you picked one in the menu') }
     const f = S.fixed
@@ -332,6 +351,10 @@ export const register: Register = on => {
       await syncCeiling($) // a file change made before this command must not override it
       S.cmd = { v: +b, t: ++tick }
       return { text: `handoff ceiling ${b} for this chat` }
+    }
+    if (a === 'baton') { // unlisted on purpose
+      const leg = S.run >= MAX_RUN ? `anchor leg (${S.run}/${MAX_RUN}): the next handoff waits for you to type` : `leg ${S.run}/${MAX_RUN}${S.lastTag ? `, carrying ${S.lastTag}` : ', baton in hand'}`
+      return { text: ['     o', `   _/|\\_[=]   ${leg}`, '     / \\', `  ${'- '.repeat(14)}`].join('\n') }
     }
     if (a === 'log') return { text: (((await $.store.get('log')) as string[] | undefined) ?? ['(empty)']).slice(-10).join('\n') }
     if (a === 'note') {

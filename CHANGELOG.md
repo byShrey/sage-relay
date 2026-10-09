@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.1
+**New**
+- Idle auto-handoff: a chat of 80k+ tokens left idle for 55+ minutes hands off on its own when you send your next message, instead of re-paying the whole chat. The new chat opens with the last reply word for word, and your message goes with the note, so the new chat answers it. Between 50k and 80k you get the old hold-and-resend. `/switch handoff off` turns both back into the plain hold.
+
+**Changed**
+- The Sonnet 5.5 default is now opt-in. Put `on` in `~/.claude/sage-relay/sonnet-default` to start every chat on Sonnet; without it, your model pick is left alone.
+
+**Fixed**
+- A model picked before the first message was quietly run as Sonnet, and picking it again did nothing.
+- The first message was saved unredacted in the tag index. It is now redacted like the note.
+- The secret filter now catches `*_KEY=` names, "my password is ..." with a digit or symbol, and Telegram, Discord, Google OAuth, Groq, Supabase, Shopify, DigitalOcean, Replicate, Perplexity, Linear and Notion tokens.
+- A message typed in the moment between the clear and the note arriving could land first. It is held for up to 5 seconds.
+- The handoff point can no longer sit above 95% of the window.
+- A second message sent before an idle handoff starts is held for the new chat instead of landing in the old one.
+- If the note never reaches the new chat, it is attached to your next message as hidden context, so you never type into a blank chat.
+- Python is looked for when a chat starts, so a Mac with no Python never gets a false "stop" from the tool gate.
+- A lock taken over as stale is no longer deleted by its old owner.
+- The archive is cut with a margin before redacting, so a cut can't leave half a key behind.
+- The notes folder is refused if it is a symlink, so the plugin can't be tricked into changing another folder's permissions.
+- Git runs with `core.fsmonitor` off and Python runs isolated (`-I`), so an untrusted repo's settings can't start a program.
+- Two timing tests that failed on a busy machine now measure what they mean to.
+
 ## 0.7.0
 **Safety**
 - A failed or empty note no longer clears the chat. The chat is kept and you see "note failed, chat kept".
