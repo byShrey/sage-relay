@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+**New**
+- The status line now names the model that really runs on each reply. If Sage Relay moved the chat to Sonnet while the menu still shows Opus, it says so, and it shows the handoff count (`handoff 1/2`: handoffs in a row before it waits for you to type).
+
 ## 0.7.2
 **Fixed**
 - Opening a chat that had stopped on the 5-hour limit started an idle handoff by itself. The app sends an empty prompt then, and it was read as you coming back. Prompts with no text are now ignored by the idle check.

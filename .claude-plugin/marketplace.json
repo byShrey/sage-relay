@@ -6,7 +6,7 @@
     {
       "name": "sage-relay",
       "source": "./plugins/sage-relay",
-      "version": "0.7.2",
+      "version": "0.7.3",
       "category": "productivity",
       "description": "Automatic handoff for long Claude Code chats, with optional model routing for helper agents."
     }

@@ -319,6 +319,10 @@ export const register: Register = on => {
     }
     if (S.fixed && (S.menu ||= e.model) !== e.model) { S.fixed = undefined; $.ui.status('fixed model off: you picked one in the menu') }
     const f = S.fixed
+    if (e.index === 0) { // the picker keeps showing the person's pick, so say what really runs
+      const run = f ? label(f.model, f.effort) : label(e.model, e.effort)
+      $.ui.status(`Running on ${run[0].toUpperCase()}${run.slice(1)}${f && f.model !== e.model ? ` (menu shows ${label(e.model).split(' ')[0].replace(/^./, c => c.toUpperCase())}, set by Sage Relay)` : ''}${S.run ? `, handoff ${S.run}/${MAX_RUN}` : ''}`)
+    }
     if (e.index === 0 && (f || await routingOn($, S))) { // one line per reply, the model that runs
       const chat = (await $.session.id().catch(() => '?')).slice(0, 4)
       try {

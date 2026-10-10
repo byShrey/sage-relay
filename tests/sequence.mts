@@ -604,5 +604,12 @@ await scenario('R27 an automatic idle handoff leaves a line in /switch log sayin
   } finally { Date.now = real }
 })
 
+await scenario('R28 the status line names the model that really runs, and says so when the menu shows another one', async () => {
+  const h = await make(SONNET_ON); await h.step('claude-opus-5-5')
+  want(h.count(/^status: .*Sonnet 5\.5 medium.*menu shows Opus/) === 1, 'forced: ' + JSON.stringify(h.log))
+  const g = await make(); await g.step('claude-opus-5-5')
+  want(g.count(/^status: .*Opus 5\.5/) === 1 && g.count(/menu shows/) === 0, 'plain: ' + JSON.stringify(g.log))
+})
+
 console.log(failed ? `${failed} FAILED` : 'all passed')
 process.exit(failed ? 1 : 0)

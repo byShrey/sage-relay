@@ -5,7 +5,7 @@
 
 # Sage Relay
 
-[![test](https://github.com/byShrey/sage-relay/actions/workflows/test.yml/badge.svg)](https://github.com/byShrey/sage-relay/actions/workflows/test.yml) ![version](https://img.shields.io/badge/version-0.7.2-1D6A49) ![licence](https://img.shields.io/badge/licence-MIT-1D6A49)
+[![test](https://github.com/byShrey/sage-relay/actions/workflows/test.yml/badge.svg)](https://github.com/byShrey/sage-relay/actions/workflows/test.yml) ![version](https://img.shields.io/badge/version-0.7.3-1D6A49) ![licence](https://img.shields.io/badge/licence-MIT-1D6A49)
 
 A plugin for Claude Code that hands a long chat to a fresh one before it gets slow and expensive, and keeps the thread.
 
