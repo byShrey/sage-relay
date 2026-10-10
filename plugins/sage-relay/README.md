@@ -11,17 +11,27 @@ A plugin for Claude Code that hands a long chat to a fresh one before it gets sl
 
 Other handoff tools wait for you to type `/handoff`. This one watches the meter and does it on its own, mid-task if it has to.
 
+> *Shrey: I built this because my chats kept re-reading their whole life story every time I typed "thanks". The other tools wait for you to remember. Bold of them.*
+
 ## Why bother
 
-Every message you send carries the whole chat with it. In a 300k-token chat, typing "thanks" costs 300k tokens. Long chats also get slower and start forgetting the middle.
+Every message you send carries the whole chat with it. ~~Most~~ **Every** message. In a 300k-token chat, typing "thanks" costs 300k tokens. Long chats also get slower and start forgetting the middle.
+
+> *Shrey: so the chat re-reads itself every time, and then forgets the middle anyway. Efficient.*
 
 Sage Relay writes down what happened, clears the chat, and hands the note to a new chat that picks up where the old one stopped.
 
 ## How it works
 
-1. Sage Relay watches the chat's size and gives you one heads-up at 250k.
-2. At 300k it stops new tool calls. A small local Python script writes the whole conversation into a note: every message, minus tool output, with secrets blanked out. No AI call, no network.
-3. The chat clears and the note arrives as the first message. The new chat shows where the work stopped, word for word, then waits for you or carries on.
+1. **Decree one.** It watches the chat's size and clears its throat once, at 250k.
+2. **Decree two.** At 300k, no more tool calls. A humble Python script writes the whole conversation into a note: every message, minus tool output, with secrets blanked out. No AI call, no network.
+3. **Decree three.** The chat clears and the note arrives as the first message. The new chat shows where the work stopped, word for word, then waits for you or carries on.
+
+```
+your chat  ->  local Python script  ->  redacted note on your disk  ->  fresh chat
+```
+
+> *Shrey: yes, step two is plain Python. No AI needed to remember what we said. Imagine that.*
 
 ## See it work
 
@@ -39,7 +49,7 @@ claude plugin marketplace add byShrey/sage-relay
 claude plugin install sage-relay@sage-relay
 ```
 
-Restart the app. You need `python3` (3.9 or newer) on macOS or Linux. On a Mac without the developer tools, install those first. If Python can't run, handoff switches itself off with one notice. It never clears a chat it couldn't save.
+Two commands: the first adds the marketplace, the second installs from it. Restart the app. You need `python3` (3.9 or newer) on macOS or Linux. On a Mac without the developer tools, install those first. If Python can't run, handoff switches itself off with one notice. It never clears a chat it couldn't save.
 
 ## What it does, and when
 
@@ -94,6 +104,8 @@ Easy questions stay in your chat. Helpers start without your chat's history, so 
 **Why not just use `/compact`?**
 Compaction writes a short summary. Sage Relay keeps what was said. In a blind 30-question test on one real chat, the Sage Relay note scored 28.5/30 and built-in compaction scored 15.5/30. That was one chat and one run, so read it as a hint.
 
+> *Shrey: a hint I will be bringing up at parties.*
+
 **Does it send my chat anywhere?**
 The plugin makes no network calls and no AI calls. The note is written to your own disk. The new chat then sends it to the API like any message you type.
 
@@ -101,7 +113,10 @@ The plugin makes no network calls and no AI calls. The note is written to your o
 At the line it refuses new tool calls, lets the reply in progress end, then hands off. If it had to stop work mid-task, the new chat carries straight on. Otherwise the new chat shows where things stopped and waits for you.
 
 **Windows?**
-Not tested. The file lock works differently there.
+Not tested. The file lock works differently there. If you try it, you're the test team.
+
+**Is the README a joke?**
+The comments are. The tests are not: every fix since 0.7.1 came with a test that failed first.
 
 ## Choosing a handoff point
 
@@ -118,10 +133,11 @@ The replay can't measure what each handoff loses, so lower isn't automatically b
 
 ## What was tested, and what wasn't
 
-- 18 hook tests, 44 handoff scenarios on a fake engine (one for each bug ever fixed), and 36 tests for the note builder, including a secret-filter list of 38 key formats and a speed test on hostile input. All of it runs on every push.
+- 18 hook tests, 49 handoff scenarios on a fake engine (one for each bug ever fixed), and 37 tests for the note builder, including a secret-filter list of 38 key formats and a speed test on hostile input. All of it runs on every push.
 - Two outside audits per release by a different AI family, every finding checked against the code.
 - A real handoff on 0.7.0: the fresh chat opened at 82k tokens, against 190k with 0.6.1.
-- **Not tested live yet:** the idle auto-handoff on the real app (proven on the fake engine only), routing switching on at plan approval, how often the chat picks the right helper, Windows.
+- The idle auto-handoff has met the real app once. It fired when nobody had typed anything. That is fixed in 0.7.2, and the first thing written was a test for it.
+- **Not tested live yet:** routing switching on at plan approval, how often the chat picks the right helper, Windows.
 - Very long chats have their middle trimmed to fit a size cap, so for those the note is not word for word.
 
 ## Privacy and security
@@ -132,7 +148,20 @@ Found a hole? See [SECURITY.md](../../SECURITY.md).
 
 ## Licence
 
+Built by byShrey. The comments in the code are mine and they are staying. If it saved you a long chat, a star on the repo is free.
+
 MIT, see [LICENSE](../../LICENSE).
+
+<details>
+<summary>Frequently unasked questions</summary>
+
+**Can it write my code for me?** No. It writes down what you said. The coding remains your problem.
+
+**What if I never reach 300k?** It does nothing. Some plugins would call that a feature.
+
+**Why "Relay"?** "Pass the Parcel" was taken.
+
+</details>
 
 <details>
 <summary>Do not open</summary>
@@ -144,6 +173,8 @@ MIT, see [LICENSE](../../LICENSE).
  ----------------------------
   you made it to the finish line.
   type /switch baton in any chat.
+  (there is a second hidden command.
+   it is humble about it.)
 ```
 
 </details>

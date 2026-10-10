@@ -9,23 +9,23 @@ const KEEP = 200
 const RELAY_SCRIPT = '/scripts/note.py' // bundled in the plugin, under $.plugin.root
 const DEFAULT_CEILING = 300_000
 const FLOOR = 20_000 // lowest ceiling /switch ceiling or the file may set
-const MAX_RUN = 2 // handoffs in a row before the person types again
+const MAX_RUN = 2 // handoffs in a row before the person types again (even a relay runner checks in with the coach)
 const LIMIT_HARD = 95 // 5-hour usage: one notice per limit window, never a clear
 const CEILING_FILE = '/.claude/sage-relay/ceiling' // optional file holding one number; lets a live test set the ceiling without typing
 const PIN_FILE = '/.claude/sage-relay/pin-models' // legacy: "on" in it switches routing on at first use
 const SONNET_FILE = '/.claude/sage-relay/sonnet-default' // "on" in it starts every chat on Sonnet 5.5 medium; off by default
 const WARN = 250 / 300 // notice at this share of the handoff point
-const IDLE_MS = 55 * 60_000 // the saved copy expires after about an hour
+const IDLE_MS = 55 * 60_000 // the saved copy expires after about an hour (my patience went sooner)
 const IDLE_MIN_TOKENS = 50_000 // below this a cold restart is cheap, so no hold
 const IDLE_HANDOFF_TOKENS = 80_000 // at or above this an idle chat hands off on its own instead of holding
-const IDLE_GROWTH = 20_000 // an idle chat must have grown this much past its smallest recorded size; a fresh chat is already about that big, so a handoff would not save anything
+const IDLE_GROWTH = 20_000 // an idle chat must have grown this much past its smallest recorded size; a fresh chat is already about that big, so a handoff would not save anything (it is moving to the next flat on the same street)
 const NOTE_WAIT_MS = 5_000 // after our clear, the person's messages wait this long for the note to land first
 const IDLE_RESEND_MS = 2 * 60_000 // sending again within this long after a hold goes through
 const GROWTH = 40_000 // after a handoff, wait for this much growth past the new chat's own start size
 const RETRY_GROWTH = 20_000 // after a failed note, try again once the chat has grown this much
 const MAX_FAILS = 3 // failed notes in a row before automatic handoff pauses for the chat
 const PY_RETRY_MS = 10 * 60_000 // look for python again this long after finding none
-const HOLD_MSGS = 50 // messages held while a note builds
+const HOLD_MSGS = 50 // messages held while a note builds (fifty is a lot of patience, or a lot of typing)
 const HOLD_CHARS = 100_000 // and their total size
 const SESSIONS = 20 // state kept for this many recent chats in one process
 const HEAD = 'Continue from the handoff note below.'
@@ -37,6 +37,7 @@ export const helperModel = (type: string): string =>
   /plan|architect|design|review/i.test(type) ? NAME.opus : NAME.sonnet
 
 // claude-opus-5-5 -> "opus 5.5"
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
 const label = (model: string, effort?: unknown): string => {
   const [, name, a, b] = model.split('-')
   return `${name} ${a}.${b} ${effort ?? ''}`.trim()
@@ -75,7 +76,7 @@ let pyAt = 0 // when python was last probed
 // This chat's ceiling: its own /switch ceiling if that is the latest write, else the file, else the default.
 const ceilOf = (S: St): { v: number; src: 'default' | 'file' | 'command' } =>
   S.cmd && S.cmd.t >= file.t ? { v: S.cmd.v, src: 'command' } : file.v !== null ? { v: file.v, src: 'file' } : { v: DEFAULT_CEILING, src: 'default' }
-const point = (S: St) => Math.min(Math.max(Math.min(ceilOf(S).v, 0.8 * (S.window || Infinity)), S.base ? S.base + GROWTH : 0), 0.95 * (S.window || Infinity)) // what actually triggers a handoff
+const point = (S: St) => Math.min(Math.max(Math.min(ceilOf(S).v, 0.8 * (S.window || Infinity)), S.base ? S.base + GROWTH : 0), 0.95 * (S.window || Infinity)) // what actually triggers a handoff: the number that matters, not the one you typed
 const willRun = (S: St) => S.auto && S.run < MAX_RUN && PY !== null
 const readHome = async ($: any, p: string): Promise<string | null> => {
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
@@ -200,7 +201,7 @@ async function holdMessage($: any, e: any): Promise<{ drop: string } | { context
   if ((S.busy || S.scheduled) && !S.cleared) { // scheduled too: a second message sent before the handoff starts must not land in the old chat
     if (S.queue.length >= HOLD_MSGS || S.queue.reduce((n, q) => n + q.length, 0) + e.text.length > HOLD_CHARS) return { drop: 'Handoff is running and the hold is full. Wait for the new chat, then send this again.' }
     S.queue.push(e.text)
-    return { drop: 'Held: it goes to the new chat with the handoff note.' }
+    return { drop: 'Held: it goes to the new chat with the handoff note. It will not get lost.' }
   }
   if (S.pending && Date.now() - S.clearAt < NOTE_WAIT_MS) return { drop: 'Held: the handoff note is arriving. Send this again in a moment.' }
   if (S.pending) { // the note never arrived: it rides along with this message instead of the person typing into a blank chat
@@ -218,7 +219,7 @@ async function holdMessage($: any, e: any): Promise<{ drop: string } | { context
       $.clock.after(0, () => void handoff($, S))
       const log = ((await $.store.get('log').catch(() => undefined)) as string[] | undefined) ?? [] // so a handoff nobody asked for can be traced
       await $.store.set('log', [...log, `idle handoff | ${(await $.session.id().catch(() => '?')).slice(0, 4)} | prompt from ${e.origin.kind}, ${e.text.length} chars | ${Math.round(last.tokens / 1000)}k tokens`].slice(-KEEP)).catch(() => {})
-      return { drop: `Held: this chat was idle ${Math.round((Date.now() - last.t) / 60_000)} min and waking it would re-pay about ${Math.round(last.tokens / 1000)}k tokens, so Sage Relay is handing off to a fresh chat. Your message goes with the note.` }
+      return { drop: `Held: this chat was idle ${Math.round((Date.now() - last.t) / 60_000)} min and waking it would re-pay about ${Math.round(last.tokens / 1000)}k tokens, so Sage Relay is handing off to a fresh chat. Nobody waited up. Your message goes with the note.` }
     }
     if (Date.now() - S.idleHeldAt > IDLE_RESEND_MS) {
       S.idleHeldAt = Date.now()
@@ -282,7 +283,7 @@ export const register: Register = on => {
     if (tokens >= Math.max(at, S.retryAt)) S.due ||= 'context'
     else if (!S.warned && !S.due && !S.retryAt && tokens >= WARN * at) {
       S.warned = true
-      $.ui.toast(`Chat is at ${Math.round(tokens / 1000)}k tokens; it hands off at ${Math.round(at / 1000)}k. /switch handoff does it now.`)
+      $.ui.toast(`Chat is at ${Math.round(tokens / 1000)}k tokens; it hands off at ${Math.round(at / 1000)}k. Consider this a courtesy. /switch handoff does it now.`)
     }
 
     return next(e)
@@ -321,7 +322,7 @@ export const register: Register = on => {
     const f = S.fixed
     if (e.index === 0) { // the picker keeps showing the person's pick, so say what really runs
       const run = f ? label(f.model, f.effort) : label(e.model, e.effort)
-      $.ui.status(`Running on ${run[0].toUpperCase()}${run.slice(1)}${f && f.model !== e.model ? ` (menu shows ${label(e.model).split(' ')[0].replace(/^./, c => c.toUpperCase())}, set by Sage Relay)` : ''}${S.run ? `, handoff ${S.run}/${MAX_RUN}` : ''}`)
+      $.ui.status(`Running on ${cap(run)}${f && f.model !== e.model ? ` (menu shows ${cap(label(e.model).split(' ')[0] ?? '')}, set by Sage Relay)` : ''}${S.run ? `, handoff ${S.run}/${MAX_RUN}` : ''}`)
     }
     if (e.index === 0 && (f || await routingOn($, S))) { // one line per reply, the model that runs
       const chat = (await $.session.id().catch(() => '?')).slice(0, 4)
@@ -362,6 +363,7 @@ export const register: Register = on => {
       S.cmd = { v: +b, t: ++tick }
       return { text: `handoff ceiling ${b} for this chat` }
     }
+    if (a === 'humble') return { text: ['      o', '    _/|\\_', '      / \\', '', 'The runner bows. The baton stays put.', 'Sage Relay is a modest plugin: it copies down what you said, blanks out your secrets and starts a new chat. It does not want credit. It would accept some.'].join('\n') } // unlisted on purpose
     if (a === 'baton') { // unlisted on purpose
       const leg = S.run >= MAX_RUN ? `anchor leg (${S.run}/${MAX_RUN}): the next handoff waits for you to type` : `leg ${S.run}/${MAX_RUN}${S.lastTag ? `, carrying ${S.lastTag}` : ', baton in hand'}`
       return { text: ['     o', `   _/|\\_[=]   ${leg}`, '     / \\', `  ${'- '.repeat(14)}`].join('\n') }
@@ -392,7 +394,7 @@ export const register: Register = on => {
       return { text: `fixed to ${label(S.fixed.model, S.fixed.effort)} until /switch off or a menu pick` }
     }
 
-    return { text: 'Usage: /switch status | note | handoff [on|off] | resend | ceiling N | routing on|off | log | opus|sonnet [low|medium|high] (a fixed model for this chat) | off (routing off, no fixed model; also stops the Sonnet default). auto = routing on (legacy).' }
+    return { text: 'Usage: /switch status | note | handoff [on|off] | resend | ceiling N | routing on|off | log | opus|sonnet [low|medium|high] (a fixed model for this chat) | off (routing off, no fixed model; also stops the Sonnet default). auto = routing on (legacy). That is the whole menu.' }
   })
 }
 

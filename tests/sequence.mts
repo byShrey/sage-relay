@@ -611,5 +611,12 @@ await scenario('R28 the status line names the model that really runs, and says s
   want(g.count(/^status: .*Opus 5\.5/) === 1 && g.count(/menu shows/) === 0, 'plain: ' + JSON.stringify(g.log))
 })
 
+await scenario('R29 the product messages keep their facts: warning, queued message and idle handoff; /switch humble is hidden', async () => {
+  const h = await make(); await h.prompt('x'); await h.measure(260_000)
+  want(h.count(/toast: Chat is at 260k tokens; it hands off at 300k/) === 1, 'warning: ' + JSON.stringify(h.log))
+  const hm = await h.sw('humble'); want(/modest/i.test(hm.text), 'humble: ' + hm.text)
+  want(!/humble/.test((await h.sw('nonsense')).text), 'humble listed in the usage line')
+})
+
 console.log(failed ? `${failed} FAILED` : 'all passed')
 process.exit(failed ? 1 : 0)

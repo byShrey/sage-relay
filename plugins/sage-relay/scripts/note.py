@@ -40,6 +40,7 @@ _TAG_RE = re.compile(r"[a-z0-9-]+")  # what a tag can look like; anything else i
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,80}")  # a session id: no slashes, no glob characters
 
 
+# Pattern matching, not a mind reader. Read a note before you share it.
 # ponytail: pattern redaction, not a real secret scanner. Anchored to key prefixes or to "name = value"
 # so commit hashes and prose survive; upgrade to gitleaks rules if a real key ever turns up in a note.
 # Every pattern starts at a word edge (lookbehind), so a hostile run like "-eyJ-eyJ-eyJ..." cannot make

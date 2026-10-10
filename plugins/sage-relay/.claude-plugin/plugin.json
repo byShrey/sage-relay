@@ -1,6 +1,6 @@
 {
   "name": "sage-relay",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Hands a long Claude Code chat off to a fresh one automatically: saves a full note, clears, carries on. Optional model routing with Deep, Careful and Scout helper agents.",
   "author": { "name": "byShrey", "url": "https://github.com/byShrey" },
   "homepage": "https://github.com/byShrey/sage-relay",

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.4
+**New**
+- The README and the plugin's own messages got a voice. Warnings, held-message notices and the code comments are drier now; failure messages stay plain and say what happened.
+- A second hidden command. It is humble about it.
+
+**Fixed**
+- The README's "not tested" list was out of date: it now says what the real app has shown so far.
+
 ## 0.7.3
 **New**
 - The status line now names the model that really runs on each reply. If Sage Relay moved the chat to Sonnet while the menu still shows Opus, it says so, and it shows the handoff count (`handoff 1/2`: handoffs in a row before it waits for you to type).
