@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2
+**Fixed**
+- Opening a chat that had stopped on the 5-hour limit started an idle handoff by itself. The app sends an empty prompt then, and it was read as you coming back. Prompts with no text are now ignored by the idle check.
+- A chat that had barely grown past its own start (a fresh chat is already about 75k) was held or handed off for no gain. The idle hold and auto-handoff now need the chat to be at least 20k past its smallest saved size.
+
+**Changed**
+- An automatic idle handoff writes a line to `/switch log` with where the prompt came from and how long it was, so a surprise one can be traced.
+
 ## 0.7.1
 **New**
 - Idle auto-handoff: a chat of 80k+ tokens left idle for 55+ minutes hands off on its own when you send your next message, instead of re-paying the whole chat. The new chat opens with the last reply word for word, and your message goes with the note, so the new chat answers it. Between 50k and 80k you get the old hold-and-resend. `/switch handoff off` turns both back into the plain hold.

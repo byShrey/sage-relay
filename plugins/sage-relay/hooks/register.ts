@@ -18,6 +18,7 @@ const WARN = 250 / 300 // notice at this share of the handoff point
 const IDLE_MS = 55 * 60_000 // the saved copy expires after about an hour
 const IDLE_MIN_TOKENS = 50_000 // below this a cold restart is cheap, so no hold
 const IDLE_HANDOFF_TOKENS = 80_000 // at or above this an idle chat hands off on its own instead of holding
+const IDLE_GROWTH = 20_000 // an idle chat must have grown this much past its smallest recorded size; a fresh chat is already about that big, so a handoff would not save anything
 const NOTE_WAIT_MS = 5_000 // after our clear, the person's messages wait this long for the note to land first
 const IDLE_RESEND_MS = 2 * 60_000 // sending again within this long after a hold goes through
 const GROWTH = 40_000 // after a handoff, wait for this much growth past the new chat's own start size
@@ -125,11 +126,12 @@ async function buildNote($: any, S: St): Promise<{ tag: string; text: string } |
 }
 
 // Last finished turn per chat (time and size), kept in the store so it survives an engine restart.
-type Idle = Record<string, { t: number; tokens: number }>
+type Idle = Record<string, { t: number; tokens: number; lo?: number }> // lo: smallest size seen for the chat
 const idleMap = async ($: any): Promise<Idle> => ((await $.store.get('idle').catch(() => undefined)) as Idle | undefined) ?? {}
 async function rememberIdle($: any, t: number, tokens: number) {
   const m = await idleMap($)
-  m[await $.session.id().catch(() => '?')] = { t, tokens }
+  const id = await $.session.id().catch(() => '?')
+  m[id] = { t, tokens, lo: Math.min(m[id]?.lo ?? tokens, tokens) }
   const keep = Object.entries(m).sort((a, b) => b[1].t - a[1].t).slice(0, SESSIONS)
   await $.store.set('idle', Object.fromEntries(keep)).catch(() => {})
 }
@@ -193,6 +195,7 @@ const regHelpers = async ($: any, S: St) => {
 // prompt.submit: while the note builds, hold what the person types (it goes to the new chat); returns the drop, or nothing to pass it on.
 async function holdMessage($: any, e: any): Promise<{ drop: string } | { context: string } | undefined> {
   if (e.origin.kind !== 'composer' && e.origin.kind !== 'bridge') return
+  if (!e.text.trim()) return // the app waking a chat sends no text; only something the person wrote counts as coming back
   const S = await st($)
   if ((S.busy || S.scheduled) && !S.cleared) { // scheduled too: a second message sent before the handoff starts must not land in the old chat
     if (S.queue.length >= HOLD_MSGS || S.queue.reduce((n, q) => n + q.length, 0) + e.text.length > HOLD_CHARS) return { drop: 'Handoff is running and the hold is full. Wait for the new chat, then send this again.' }
@@ -206,12 +209,15 @@ async function holdMessage($: any, e: any): Promise<{ drop: string } | { context
     return { context: note }
   }
   // Idle hold: last turn time and size come from the store, so an engine restart does not forget them. A second send within 2 minutes goes through.
-  const last = S.doneAt ? { t: S.doneAt, tokens: S.tokens } : (await idleMap($))[await $.session.id().catch(() => '?')]
-  if (last && last.tokens >= IDLE_MIN_TOKENS && Date.now() - last.t > IDLE_MS) {
+  const saved = (await idleMap($))[await $.session.id().catch(() => '?')]
+  const last = S.doneAt ? { t: S.doneAt, tokens: S.tokens, lo: saved?.lo } : saved
+  if (last && last.tokens >= IDLE_MIN_TOKENS && Date.now() - last.t > IDLE_MS && (last.lo === undefined || last.tokens - last.lo >= IDLE_GROWTH)) {
     S.run = 0
     if (last.tokens >= IDLE_HANDOFF_TOKENS && willRun(S) && !S.scheduled) { // the note costs no tokens; waking the old chat would
       S.tokens = last.tokens; S.doneAt = Date.now(); S.queue = [e.text]; S.due = 'manual'; S.scheduled = true
       $.clock.after(0, () => void handoff($, S))
+      const log = ((await $.store.get('log').catch(() => undefined)) as string[] | undefined) ?? [] // so a handoff nobody asked for can be traced
+      await $.store.set('log', [...log, `idle handoff | ${(await $.session.id().catch(() => '?')).slice(0, 4)} | prompt from ${e.origin.kind}, ${e.text.length} chars | ${Math.round(last.tokens / 1000)}k tokens`].slice(-KEEP)).catch(() => {})
       return { drop: `Held: this chat was idle ${Math.round((Date.now() - last.t) / 60_000)} min and waking it would re-pay about ${Math.round(last.tokens / 1000)}k tokens, so Sage Relay is handing off to a fresh chat. Your message goes with the note.` }
     }
     if (Date.now() - S.idleHeldAt > IDLE_RESEND_MS) {

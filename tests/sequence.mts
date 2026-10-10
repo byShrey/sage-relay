@@ -423,7 +423,7 @@ await scenario('R10 no Haiku anywhere in the hook code or the helper types', asy
 await scenario('R11 idle hold: survives an engine restart, one resend goes through, short chats and recent ones are not held', async () => {
   const real = Date.now
   try {
-    const h1 = await make(); await h1.prompt('x'); await h1.measure(60_000); await h1.complete()
+    const h1 = await make(); await h1.prompt('x'); await h1.measure(30_000); await h1.complete(); await h1.measure(60_000); await h1.complete()
     Date.now = () => real() + 30 * 60_000
     const h30 = await make({ kv: h1.kv })
     want((await h30.prompt('after 30 min')).drop === undefined, 'held after only 30 min')
@@ -443,7 +443,7 @@ await scenario('R11b idle hold is per chat: chat B finishing a turn does not hid
   const real = Date.now
   try {
     const h = await make(); const A = h.fork('A'), B = h.fork('B')
-    await A.measure(60_000); await A.complete()
+    await A.measure(30_000); await A.complete(); await A.measure(60_000); await A.complete()
     Date.now = () => real() + 70 * 60_000
     await B.measure(60_000); await B.complete()
     want(/^Held/.test(((await A.prompt('back again')) as any).drop ?? ''), 'chat A not held')
@@ -488,7 +488,7 @@ await scenario('R17 without the sonnet-default file a model picked before the fi
 await scenario('R18 idle 70 min at 80k or more: hands off on its own, the typed message rides along, the new chat shows the last reply', async () => {
   const real = Date.now
   try {
-    const h1 = await make(); await h1.prompt('x'); await h1.measure(120_000); await h1.complete()
+    const h1 = await make(); await h1.prompt('x'); await h1.measure(30_000); await h1.complete(); await h1.measure(120_000); await h1.complete()
     Date.now = () => real() + 70 * 60_000
     const h = await make({ kv: h1.kv })
     const r: any = await h.prompt('what was I doing?')
@@ -504,7 +504,7 @@ await scenario('R18 idle 70 min at 80k or more: hands off on its own, the typed 
 await scenario('R18b idle at 80k+ with automatic handoff off: the old hold-and-resend, no clear', async () => {
   const real = Date.now
   try {
-    const h = await make(); await h.prompt('x'); await h.sw('handoff off'); await h.measure(120_000); await h.complete()
+    const h = await make(); await h.prompt('x'); await h.sw('handoff off'); await h.measure(30_000); await h.complete(); await h.measure(120_000); await h.complete()
     Date.now = () => real() + 70 * 60_000
     const r: any = await h.prompt('back')
     want(/^Held: this chat was idle/.test(r.drop ?? ''), 'not the old hold: ' + JSON.stringify(r))
@@ -538,7 +538,7 @@ await scenario('R21 python is looked for at session start: no python means no fa
 await scenario('R22 a second message sent before the idle handoff starts is held for the new chat, not lost in the old one', async () => {
   const real = Date.now
   try {
-    const h1 = await make(); await h1.prompt('x'); await h1.measure(120_000); await h1.complete()
+    const h1 = await make(); await h1.prompt('x'); await h1.measure(30_000); await h1.complete(); await h1.measure(120_000); await h1.complete()
     Date.now = () => real() + 70 * 60_000
     const h = await make({ kv: h1.kv })
     await h.prompt('first')
@@ -568,6 +568,40 @@ await scenario('R24 /switch baton: hidden, shows the leg count, anchor leg at th
   await h.sw('handoff'); await h.run(); await h.sw('handoff'); await h.run()
   const r2 = await h.sw('baton'); want(/anchor leg/.test(r2.text), 'no anchor leg at 2/2: ' + r2.text)
   want(!/baton/.test((await h.sw('nonsense')).text), 'baton listed in the usage line')
+})
+
+await scenario('R25 an empty prompt (the app waking a chat, nothing typed) never starts an idle handoff or hold', async () => {
+  const real = Date.now
+  try {
+    const h1 = await make(); await h1.prompt('x'); await h1.measure(30_000); await h1.complete(); await h1.measure(120_000); await h1.complete()
+    Date.now = () => real() + 576 * 60_000
+    const h = await make({ kv: h1.kv })
+    for (const t of ['', '  \n ']) want((await h.prompt(t)).drop === undefined, 'empty prompt was held')
+    await h.run(); want(h.count(/^COMMAND clear/) === 0, 'cleared on an empty prompt')
+  } finally { Date.now = real }
+})
+
+await scenario('R26 an idle chat that has not grown past its own start (about the size of a fresh chat) is not held or handed off', async () => {
+  const real = Date.now
+  try {
+    const h1 = await make(); await h1.prompt('x'); await h1.measure(77_000); await h1.complete(); await h1.measure(80_000); await h1.complete()
+    Date.now = () => real() + 576 * 60_000
+    const h = await make({ kv: h1.kv })
+    want((await h.prompt('back')).drop === undefined, 'a barely-grown chat was held')
+    await h.run(); want(h.count(/^COMMAND clear/) === 0, 'cleared a barely-grown chat')
+  } finally { Date.now = real }
+})
+
+await scenario('R27 an automatic idle handoff leaves a line in /switch log saying where the prompt came from and its length', async () => {
+  const real = Date.now
+  try {
+    const h1 = await make(); await h1.prompt('x'); await h1.measure(30_000); await h1.complete(); await h1.measure(120_000); await h1.complete()
+    Date.now = () => real() + 70 * 60_000
+    const h = await make({ kv: h1.kv })
+    await h.prompt('hello', 'bridge'); await h.run()
+    const line = ((h.kv.log as string[]) ?? []).find(l => /idle handoff/.test(l)) ?? ''
+    want(/bridge/.test(line) && /5 chars/.test(line), 'log line: ' + JSON.stringify(h.kv.log))
+  } finally { Date.now = real }
 })
 
 console.log(failed ? `${failed} FAILED` : 'all passed')

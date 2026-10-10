@@ -5,7 +5,7 @@
 
 # Sage Relay
 
-[![test](https://github.com/byShrey/sage-relay/actions/workflows/test.yml/badge.svg)](https://github.com/byShrey/sage-relay/actions/workflows/test.yml) ![version](https://img.shields.io/badge/version-0.7.1-1D6A49) ![licence](https://img.shields.io/badge/licence-MIT-1D6A49)
+[![test](https://github.com/byShrey/sage-relay/actions/workflows/test.yml/badge.svg)](https://github.com/byShrey/sage-relay/actions/workflows/test.yml) ![version](https://img.shields.io/badge/version-0.7.2-1D6A49) ![licence](https://img.shields.io/badge/licence-MIT-1D6A49)
 
 A plugin for Claude Code that hands a long chat to a fresh one before it gets slow and expensive, and keeps the thread.
 
@@ -47,8 +47,8 @@ Restart the app. You need `python3` (3.9 or newer) on macOS or Linux. On a Mac w
 |---|---|
 | The chat reaches 250k (83% of the handoff point) | One notice, saying where the handoff will happen. |
 | The chat reaches 300k, or 80% of the model's window if that is smaller | Builds the note, clears the chat, sends the note to the new chat. Anything you type meanwhile is held and goes along with the note. |
-| You come back after 55+ minutes to a chat of 80k or more | The saved copy of the chat has probably expired, so your next message would re-pay all of it. Sage Relay hands off instead, and your message rides along with the note. |
-| Same, but the chat is 50k to 80k | Your message is held once, with the cost. Send it again within 2 minutes to go ahead anyway. |
+| You come back after 55+ minutes to a chat of 80k or more that has grown at least 20k since it began | The saved copy of the chat has probably expired, so your next message would re-pay all of it. Sage Relay hands off instead, and your message rides along with the note. |
+| Same, but the chat is 50k to 80k (still 20k past its start) | Your message is held once, with the cost. Send it again within 2 minutes to go ahead anyway. |
 | You hit 95% of your 5-hour usage limit | One notice. Nothing is cleared. |
 | A fresh chat after a handoff | It waits for 40k tokens of growth before it can hand off again, and stops at 2 in a row until you type. |
 
